@@ -1,0 +1,24 @@
+# Implementation Status
+
+**Update history**
+
+- 2026-05-09: Initial draft
+
+---
+
+Tracks milestone progress. When in doubt, this overrides the specs about current status.
+
+## Milestone progress
+
+| Milestone                                        | Status      | Notes |
+| ------------------------------------------------ | ----------- | ----- |
+| M0 - Scaffold                                    | Not started |       |
+| M1 - WebAuthn authentication                     | Not started |       |
+| M2 - Vault entries                               | Not started |       |
+| M3 - Contacts and per-entry recipient assignment | Not started |       |
+| M4 - Release state machine                       | Not started |       |
+| M5 - Audit log and backup export                 | Not started |       |
+| M6 - Design polish                               | Not started |       |
+| M7 - Hardening, deployment, docs                 | Not started |       |
+
+On milestone close, update the row to Done or Partial and log the date in the Update history. Demote Done rows to Partial if implementation rots later.

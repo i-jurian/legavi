@@ -1,0 +1,22 @@
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+deploy/docker/.env
+
+# Build outputs
+backend/bin/
+backend/dist/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# Logs
+*.log
