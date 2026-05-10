@@ -16,7 +16,7 @@ const EXTERNAL_CSS_RE =
 const EXTERNAL_MODULE_RE =
   /<link[^<>]*['"]*rel['"]*=['"]*modulepreload['"]*[^<>]+['"]*href['"]*=['"]([^^ '"]+)['"][^<>]*>/g;
 const SKIP_SRI_ATTR_RE =
-  /\s+skip-sri(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>\/]+))?/i;
+  /\s+skip-sri(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>/]+))?/i;
 
 export interface SriOptions {
   ignoreMissingAsset?: boolean;
