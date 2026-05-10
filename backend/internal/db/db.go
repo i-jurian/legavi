@@ -63,7 +63,7 @@ func (db *DB) Migrate(migrationsFS fs.FS) error {
 	if err != nil {
 		return fmt.Errorf("open sql db for migrations: %w", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	if err := goose.Up(sqlDB, "."); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
