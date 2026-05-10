@@ -2,10 +2,12 @@ pre-commit:
   parallel: true
   jobs:
     - name: gofmt
-      glob: "backend/**/*.go"
+      root: backend
+      glob: "**/*.go"
       run: gofmt -w {staged_files}
       stage_fixed: true
     - name: eslint
-      glob: "frontend/**/*.{ts,tsx,js,jsx}"
-      run: cd frontend && npx eslint --fix {staged_files}
+      root: frontend
+      glob: "**/*.{ts,tsx,js,jsx}"
+      run: npx eslint --fix {staged_files}
       stage_fixed: true
