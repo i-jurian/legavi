@@ -19,7 +19,7 @@ test-fe:
 lint: lint-be lint-fe
 
 lint-be:
-	cd backend && go vet ./...
+	cd backend && golangci-lint run
 
 lint-fe:
 	cd frontend && npm run lint
