@@ -1,6 +1,6 @@
 module github.com/i-jurian/legavi/backend
 
-go 1.25.10
+go 1.26.3
 
 require (
 	github.com/go-chi/chi/v5 v5.2.5
