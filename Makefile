@@ -1,14 +1,20 @@
-.PHONY: dev dev-down test test-be test-fe lint lint-be lint-fe
+.PHONY: dev dev-up dev-be dev-fe dev-down test test-be test-fe lint lint-be lint-fe
 
 COMPOSE_FILE := deploy/docker/compose.yaml
 
-dev: dev-up dev-be
+dev: dev-up
+	cd frontend && npx concurrently -n be,fe -c blue,green \
+	  "cd ../backend && go run ./cmd/api" \
+	  "npm run dev"
 
 dev-up:
 	docker compose -f $(COMPOSE_FILE) up -d --wait postgres mailhog
 
 dev-be:
-	cd backend && go run ./cmd/api 
+	cd backend && go run ./cmd/api
+
+dev-fe:
+	cd frontend && npm run dev
 
 dev-down:
 	docker compose -f $(COMPOSE_FILE) down

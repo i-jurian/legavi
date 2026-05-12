@@ -3,7 +3,6 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/i-jurian/legavi/backend/internal/store"
 )
@@ -40,6 +38,14 @@ type registerVerifyRequest struct {
 	Response     json.RawMessage `json:"response"`
 }
 
+type loginStartRequest struct {
+	Email string `json:"email"`
+}
+
+type loginVerifyRequest struct {
+	Response json.RawMessage `json:"response"`
+}
+
 func NewHandler(wa *WebAuthn, j *JWT, s *store.Store) *Handler {
 	return &Handler{webauthn: wa, jwt: j, store: s}
 }
@@ -50,7 +56,7 @@ func (u *webauthnUser) WebAuthnDisplayName() string                { return u.di
 func (u *webauthnUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
 
 func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
-	// Parse then validate body
+	// Validate request payload
 	var req registerStartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -63,19 +69,27 @@ func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create user (StatusConflict / 409 on duplicate email)
-	user, err := h.store.CreateUser(r.Context(), email, displayName)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	user, err := h.store.GetUserByEmail(r.Context(), email)
+	if err == nil {
+		count, err := h.store.CountUserCredentials(r.Context(), user.ID)
+		if err != nil {
+			http.Error(w, "lookup credentials failed", http.StatusInternalServerError)
+			return
+		}
+
+		// 409 only if a credential is already attached; otherwise reuse the orphan row
+		if count > 0 {
 			http.Error(w, "email already registered", http.StatusConflict)
 			return
 		}
-		http.Error(w, "create user failed", http.StatusInternalServerError)
-		return
+	} else {
+		user, err = h.store.CreateUser(r.Context(), email, displayName)
+		if err != nil {
+			http.Error(w, "create user failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	// Build WebAuthn user adapter
 	waUser := &webauthnUser{
 		id:          user.ID.Bytes[:],
 		email:       user.Email,
@@ -89,21 +103,19 @@ func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serialize SessionData for persistence
+	// Persist challenge state for the verify step
 	sessionJSON, err := json.Marshal(sessionData)
 	if err != nil {
 		http.Error(w, "marshal session failed", http.StatusInternalServerError)
 		return
 	}
-
-	// Store session row
 	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "register", 5*time.Minute)
 	if err != nil {
 		http.Error(w, "save session failed", http.StatusInternalServerError)
 		return
 	}
 
-	// Set session cookie
+	// Bind ceremony to this browser via cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "lgv_webauthn_session",
 		Value:    uuid.UUID(session.ID.Bytes).String(),
@@ -114,13 +126,13 @@ func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   300,
 	})
 
-	// Return credential creation options
+	// Send challenge to the browser
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(options)
 }
 
 func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
-	// Read session cookie
+	// Validate session cookie
 	cookie, err := r.Cookie("lgv_webauthn_session")
 	if err != nil {
 		http.Error(w, "missing session cookie", http.StatusUnauthorized)
@@ -132,7 +144,7 @@ func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse body
+	// Validate request payload
 	var req registerVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -143,21 +155,21 @@ func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Consume ceremony session row
+	// Bind verify to its start ceremony (single-use)
 	session, err := h.store.ConsumeSession(r.Context(), sessionID, "register")
 	if err != nil {
 		http.Error(w, "session expired or invalid", http.StatusUnauthorized)
 		return
 	}
 
-	// Deserialize stored SessionData
+	// Restore challenge state to verify
 	var sessionData webauthn.SessionData
 	if err := json.Unmarshal(session.SessionData, &sessionData); err != nil {
 		http.Error(w, "corrupt session", http.StatusInternalServerError)
 		return
 	}
 
-	// Look up user
+	// Validate user exists
 	user, err := h.store.GetUserByID(r.Context(), session.UserID)
 	if err != nil {
 		http.Error(w, "user not found", http.StatusUnauthorized)
@@ -171,27 +183,193 @@ func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 		displayName: user.DisplayName,
 	}
 
-	// Parse WebAuthn response from the raw JSON
+	// Decode browser attestation
 	parsed, err := protocol.ParseCredentialCreationResponseBody(bytes.NewReader(req.Response))
 	if err != nil {
 		http.Error(w, "invalid registration response", http.StatusBadRequest)
 		return
 	}
 
-	// Verify response against stored sessionData
+	// Verify attestation against the original challenge
 	credential, err := h.webauthn.CreateCredential(waUser, sessionData, parsed)
 	if err != nil {
 		http.Error(w, "verification failed", http.StatusUnauthorized)
 		return
 	}
 
-	// Save credential with its age recipient + optional nickname
+	// Persist new credential for this user
 	if _, err := h.store.CreateCredential(r.Context(), user.ID.Bytes, credential, req.AgeRecipient, req.Nickname); err != nil {
 		http.Error(w, "save credential failed", http.StatusInternalServerError)
 		return
 	}
 
-	// Issue a JWT for the new session
+	// Authenticate the user for subsequent requests
+	token, err := h.jwt.Issue(user.ID.Bytes)
+	if err != nil {
+		http.Error(w, "issue token failed", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:   "lgv_webauthn_session",
+		Value:  "",
+		Path:   "/api/v1/auth",
+		MaxAge: -1,
+	})
+	h.jwt.SetSessionCookie(w, token)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) LoginStart(w http.ResponseWriter, r *http.Request) {
+	// Validate request payload
+	var req loginStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		http.Error(w, "email required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate user exists (vague 401 to avoid leaking which emails exist)
+	user, err := h.store.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	// Build credential allowlist for this user
+	creds, err := h.store.ListUserWebAuthnCredentials(r.Context(), user.ID.Bytes)
+	if err != nil {
+		http.Error(w, "lookup credentials failed", http.StatusInternalServerError)
+		return
+	}
+	if len(creds) == 0 {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	waUser := &webauthnUser{
+		id:          user.ID.Bytes[:],
+		email:       user.Email,
+		displayName: user.DisplayName,
+		credentials: creds,
+	}
+
+	// Begin login ceremony
+	options, sessionData, err := h.webauthn.BeginLogin(waUser)
+	if err != nil {
+		http.Error(w, "begin login failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Persist challenge state for the verify step
+	sessionJSON, err := json.Marshal(sessionData)
+	if err != nil {
+		http.Error(w, "marshal session failed", http.StatusInternalServerError)
+		return
+	}
+	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "login", 5*time.Minute)
+	if err != nil {
+		http.Error(w, "save session failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Bind ceremony to this browser via cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "lgv_webauthn_session",
+		Value:    uuid.UUID(session.ID.Bytes).String(),
+		Path:     "/api/v1/auth",
+		HttpOnly: true,
+		Secure:   false, // TODO: true in production
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   300,
+	})
+
+	// Send challenge to the browser
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(options)
+}
+
+func (h *Handler) LoginVerify(w http.ResponseWriter, r *http.Request) {
+	// Validate session cookie
+	cookie, err := r.Cookie("lgv_webauthn_session")
+	if err != nil {
+		http.Error(w, "missing session cookie", http.StatusUnauthorized)
+		return
+	}
+	sessionID, err := uuid.Parse(cookie.Value)
+	if err != nil {
+		http.Error(w, "invalid session cookie", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate request payload
+	var req loginVerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	// Bind verify to its start ceremony (single-use)
+	session, err := h.store.ConsumeSession(r.Context(), sessionID, "login")
+	if err != nil {
+		http.Error(w, "session expired or invalid", http.StatusUnauthorized)
+		return
+	}
+
+	// Restore challenge state to verify
+	var sessionData webauthn.SessionData
+	if err := json.Unmarshal(session.SessionData, &sessionData); err != nil {
+		http.Error(w, "corrupt session", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate user exists
+	user, err := h.store.GetUserByID(r.Context(), session.UserID)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+
+	// Build credential allowlist for matching the assertion
+	creds, err := h.store.ListUserWebAuthnCredentials(r.Context(), user.ID.Bytes)
+	if err != nil {
+		http.Error(w, "lookup credentials failed", http.StatusInternalServerError)
+		return
+	}
+
+	waUser := &webauthnUser{
+		id:          user.ID.Bytes[:],
+		email:       user.Email,
+		displayName: user.DisplayName,
+		credentials: creds,
+	}
+
+	// Decode browser assertion
+	parsed, err := protocol.ParseCredentialRequestResponseBody(bytes.NewReader(req.Response))
+	if err != nil {
+		http.Error(w, "invalid assertion", http.StatusBadRequest)
+		return
+	}
+
+	// Verify assertion against the original challenge
+	credential, err := h.webauthn.ValidateLogin(waUser, sessionData, parsed)
+	if err != nil {
+		http.Error(w, "verification failed", http.StatusUnauthorized)
+		return
+	}
+
+	// Record credential usage (cloning detection + audit)
+	if err := h.store.UpdateCredentialUsage(r.Context(), credential.ID, credential.Authenticator.SignCount); err != nil {
+		http.Error(w, "update credential failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Authenticate the user for subsequent requests
 	token, err := h.jwt.Issue(user.ID.Bytes)
 	if err != nil {
 		http.Error(w, "issue token failed", http.StatusInternalServerError)
