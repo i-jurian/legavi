@@ -4,6 +4,8 @@ import {
   createRouter,
   Outlet,
 } from "@tanstack/react-router";
+import { LoginPage } from "./routes/login";
+import { RegisterPage } from "./routes/register";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -18,13 +20,13 @@ const indexRoute = createRoute({
 const registerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/register",
-  component: () => <div>register</div>,
+  component: RegisterPage,
 });
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
-  component: () => <div>login</div>,
+  component: LoginPage,
 });
 
 const dashboardRoute = createRoute({

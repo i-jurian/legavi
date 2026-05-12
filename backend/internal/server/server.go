@@ -45,6 +45,8 @@ func (s *Server) apiRoutes() http.Handler {
 	r.Get("/readyz", s.readyz)
 	r.Post("/api/v1/auth/register/start", s.auth.RegisterStart)
 	r.Post("/api/v1/auth/register/verify", s.auth.RegisterVerify)
+	r.Post("/api/v1/auth/login/start", s.auth.LoginStart)
+	r.Post("/api/v1/auth/login/verify", s.auth.LoginVerify)
 	return r
 }
 

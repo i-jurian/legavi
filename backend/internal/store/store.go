@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -77,5 +78,37 @@ func (s *Store) CreateCredential(
 		Transports:   transports,
 		AgeRecipient: ageRecipient,
 		Nickname:     nickname,
+	})
+}
+
+func (s *Store) ListUserWebAuthnCredentials(ctx context.Context, userID uuid.UUID) ([]webauthn.Credential, error) {
+	rows, err := s.Queries.ListUserCredentials(ctx, pgtype.UUID{Bytes: userID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]webauthn.Credential, len(rows))
+	for i, row := range rows {
+		transports := make([]protocol.AuthenticatorTransport, len(row.Transports))
+		for j, t := range row.Transports {
+			transports[j] = protocol.AuthenticatorTransport(t)
+		}
+		aaguid := row.Aaguid.Bytes
+		out[i] = webauthn.Credential{
+			ID:        row.ID,
+			PublicKey: row.PublicKey,
+			Transport: transports,
+			Authenticator: webauthn.Authenticator{
+				AAGUID:    aaguid[:],
+				SignCount: uint32(row.SignCount),
+			},
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) UpdateCredentialUsage(ctx context.Context, credentialID []byte, signCount uint32) error {
+	return s.Queries.UpdateCredentialUsage(ctx, UpdateCredentialUsageParams{
+		ID:        credentialID,
+		SignCount: int64(signCount),
 	})
 }

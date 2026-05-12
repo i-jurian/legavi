@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUserCredentials = `-- name: CountUserCredentials :one
+SELECT count(*) FROM credentials
+WHERE user_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) CountUserCredentials(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserCredentials, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCredential = `-- name: CreateCredential :one
 INSERT INTO credentials (
     id,

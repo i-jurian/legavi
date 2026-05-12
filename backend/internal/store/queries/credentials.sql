@@ -12,6 +12,10 @@ INSERT INTO credentials (
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
+-- name: CountUserCredentials :one
+SELECT count(*) FROM credentials
+WHERE user_id = $1 AND deleted_at IS NULL;
+
 -- name: ListUserCredentials :many
 SELECT * FROM credentials
 WHERE user_id = $1 AND deleted_at IS NULL
