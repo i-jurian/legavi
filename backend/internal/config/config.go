@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -68,4 +69,8 @@ func Load() (*Config, error) {
 	cfg.TestMode = testMode
 
 	return cfg, nil
+}
+
+func (c *Config) IsSecure() bool {
+	return strings.HasPrefix(c.PublicURL, "https://")
 }

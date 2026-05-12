@@ -30,7 +30,7 @@ CREATE TABLE webauthn_sessions (
     id           UUID PRIMARY KEY,
     user_id      UUID REFERENCES users(id) ON DELETE CASCADE,
     session_data BYTEA NOT NULL,
-    purpose      TEXT NOT NULL CHECK (purpose IN ('register', 'authenticate')),
+    purpose      TEXT NOT NULL CHECK (purpose IN ('register', 'login')),
     expires_at   TIMESTAMPTZ NOT NULL,
     consumed_at  TIMESTAMPTZ
 );
