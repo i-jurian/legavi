@@ -4,6 +4,7 @@ import {
   createRouter,
   Outlet,
 } from "@tanstack/react-router";
+import { DashboardPage } from "./routes/dashboard";
 import { LoginPage } from "./routes/login";
 import { RegisterPage } from "./routes/register";
 
@@ -32,7 +33,7 @@ const loginRoute = createRoute({
 const dashboardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dashboard",
-  component: () => <div>dashboard</div>,
+  component: DashboardPage,
 });
 
 const routeTree = rootRoute.addChildren([

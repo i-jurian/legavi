@@ -43,10 +43,19 @@ func (s *Server) apiRoutes() http.Handler {
 
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
-	r.Post("/api/v1/auth/register/start", s.auth.RegisterStart)
-	r.Post("/api/v1/auth/register/verify", s.auth.RegisterVerify)
-	r.Post("/api/v1/auth/login/start", s.auth.LoginStart)
-	r.Post("/api/v1/auth/login/verify", s.auth.LoginVerify)
+
+	r.Route("/api/v1/auth", func(r chi.Router) {
+		r.Post("/register/start", s.auth.RegisterStart)
+		r.Post("/register/verify", s.auth.RegisterVerify)
+		r.Post("/login/start", s.auth.LoginStart)
+		r.Post("/login/verify", s.auth.LoginVerify)
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(s.auth.RequireSession)
+		r.Post("/api/v1/auth/logout", s.auth.Logout)
+	})
+
 	return r
 }
 

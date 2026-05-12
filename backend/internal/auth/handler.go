@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -18,6 +17,7 @@ type Handler struct {
 	webauthn *WebAuthn
 	jwt      *JWT
 	store    *store.Store
+	cookies  *Cookies
 }
 
 type webauthnUser struct {
@@ -46,8 +46,8 @@ type loginVerifyRequest struct {
 	Response json.RawMessage `json:"response"`
 }
 
-func NewHandler(wa *WebAuthn, j *JWT, s *store.Store) *Handler {
-	return &Handler{webauthn: wa, jwt: j, store: s}
+func NewHandler(wa *WebAuthn, j *JWT, s *store.Store, c *Cookies) *Handler {
+	return &Handler{webauthn: wa, jwt: j, store: s, cookies: c}
 }
 
 func (u *webauthnUser) WebAuthnID() []byte                         { return u.id }
@@ -109,22 +109,14 @@ func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "marshal session failed", http.StatusInternalServerError)
 		return
 	}
-	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "register", 5*time.Minute)
+	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "register", ceremonyTTL)
 	if err != nil {
 		http.Error(w, "save session failed", http.StatusInternalServerError)
 		return
 	}
 
 	// Bind ceremony to this browser via cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "lgv_webauthn_session",
-		Value:    uuid.UUID(session.ID.Bytes).String(),
-		Path:     "/api/v1/auth",
-		HttpOnly: true,
-		Secure:   false, // TODO: true in production
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   300,
-	})
+	h.cookies.SetCeremony(w, uuid.UUID(session.ID.Bytes))
 
 	// Send challenge to the browser
 	w.Header().Set("Content-Type", "application/json")
@@ -133,7 +125,7 @@ func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 	// Validate session cookie
-	cookie, err := r.Cookie("lgv_webauthn_session")
+	cookie, err := r.Cookie(ceremonyCookieName)
 	if err != nil {
 		http.Error(w, "missing session cookie", http.StatusUnauthorized)
 		return
@@ -210,13 +202,8 @@ func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:   "lgv_webauthn_session",
-		Value:  "",
-		Path:   "/api/v1/auth",
-		MaxAge: -1,
-	})
-	h.jwt.SetSessionCookie(w, token)
+	h.cookies.ClearCeremony(w)
+	h.cookies.SetSession(w, token)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -272,22 +259,14 @@ func (h *Handler) LoginStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "marshal session failed", http.StatusInternalServerError)
 		return
 	}
-	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "login", 5*time.Minute)
+	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "login", ceremonyTTL)
 	if err != nil {
 		http.Error(w, "save session failed", http.StatusInternalServerError)
 		return
 	}
 
 	// Bind ceremony to this browser via cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "lgv_webauthn_session",
-		Value:    uuid.UUID(session.ID.Bytes).String(),
-		Path:     "/api/v1/auth",
-		HttpOnly: true,
-		Secure:   false, // TODO: true in production
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   300,
-	})
+	h.cookies.SetCeremony(w, uuid.UUID(session.ID.Bytes))
 
 	// Send challenge to the browser
 	w.Header().Set("Content-Type", "application/json")
@@ -296,7 +275,7 @@ func (h *Handler) LoginStart(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) LoginVerify(w http.ResponseWriter, r *http.Request) {
 	// Validate session cookie
-	cookie, err := r.Cookie("lgv_webauthn_session")
+	cookie, err := r.Cookie(ceremonyCookieName)
 	if err != nil {
 		http.Error(w, "missing session cookie", http.StatusUnauthorized)
 		return
@@ -376,13 +355,13 @@ func (h *Handler) LoginVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:   "lgv_webauthn_session",
-		Value:  "",
-		Path:   "/api/v1/auth",
-		MaxAge: -1,
-	})
-	h.jwt.SetSessionCookie(w, token)
+	h.cookies.ClearCeremony(w)
+	h.cookies.SetSession(w, token)
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	h.cookies.ClearSession(w)
+	w.WriteHeader(http.StatusNoContent)
 }

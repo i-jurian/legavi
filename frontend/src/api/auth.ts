@@ -89,3 +89,13 @@ export async function loginVerify(body: LoginVerifyBody): Promise<void> {
     throw new Error(`login/verify failed: ${res.status} ${await res.text()}`);
   }
 }
+
+export async function logout(): Promise<void> {
+  const res = await fetch(`${BASE}/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`logout failed: ${res.status} ${await res.text()}`);
+  }
+}

@@ -58,7 +58,8 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	st := store.NewStore(database.Pool)
-	authH := auth.NewHandler(wa, jwt, st)
+	cookies := auth.NewCookies(cfg.IsSecure(), cfg.JWTTTL)
+	authH := auth.NewHandler(wa, jwt, st, cookies)
 
 	log.Info("api starting", "public_url", cfg.PublicURL, "test_mode", cfg.TestMode)
 

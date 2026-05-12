@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	jose "github.com/golang-jwt/jwt/v5"
@@ -49,24 +48,4 @@ func (j *JWT) Parse(tokenString string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return uuid.Parse(claims.Subject)
-}
-
-func (j *JWT) SetSessionCookie(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "lgv_session",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   false, // TODO: true in production
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(j.ttl.Seconds()),
-	})
-}
-func (j *JWT) ClearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:   "lgv_session",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
 }
