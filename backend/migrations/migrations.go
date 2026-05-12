@@ -1,5 +1,5 @@
 // Package migrations exposes the goose migration SQL files as an embed.FS,
-// consumed by internal/db's Migrate method.
+// consumed by internal/pool's Migrate method.
 package migrations
 
 import "embed"

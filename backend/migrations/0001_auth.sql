@@ -24,23 +24,23 @@ CREATE TABLE credentials (
     deleted_at    TIMESTAMPTZ
 );
 
-CREATE INDEX credentials_user_active_idx ON credentials(user_id) WHERE deleted_at IS NULL;
+CREATE INDEX credentials_user_active_idx ON credentials(user_id) WHERE deleted_at IS NULL; 
 
-CREATE TABLE webauthn_challenges (
-    id          UUID PRIMARY KEY,
-    user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
-    challenge   BYTEA NOT NULL,
-    purpose     TEXT NOT NULL CHECK (purpose IN ('register', 'authenticate')),
-    expires_at  TIMESTAMPTZ NOT NULL,
-    consumed_at TIMESTAMPTZ
+CREATE TABLE webauthn_sessions (
+    id           UUID PRIMARY KEY,
+    user_id      UUID REFERENCES users(id) ON DELETE CASCADE,
+    session_data BYTEA NOT NULL,
+    purpose      TEXT NOT NULL CHECK (purpose IN ('register', 'authenticate')),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    consumed_at  TIMESTAMPTZ
 );
 
-CREATE INDEX webauthn_challenges_expires_idx ON webauthn_challenges(expires_at);
+CREATE INDEX webauthn_sessions_expires_idx ON webauthn_sessions(expires_at); 
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE webauthn_challenges;
+DROP TABLE webauthn_sessions;
 DROP TABLE credentials;
 DROP TABLE users;
 -- +goose StatementEnd

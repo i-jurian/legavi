@@ -9,10 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/i-jurian/legavi/backend/internal/auth"
 	"github.com/i-jurian/legavi/backend/internal/config"
-	"github.com/i-jurian/legavi/backend/internal/db"
+	"github.com/i-jurian/legavi/backend/internal/pool"
 	"github.com/i-jurian/legavi/backend/internal/server"
+	"github.com/i-jurian/legavi/backend/internal/store"
 	"github.com/i-jurian/legavi/backend/migrations"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -26,6 +29,7 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
+	_ = godotenv.Load("../.env")
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -34,7 +38,7 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	database, err := db.Connect(ctx, cfg.DatabaseURL)
+	database, err := pool.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -45,9 +49,20 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	wa, err := auth.NewWebAuthn(cfg.PublicURL)
+	if err != nil {
+		return err
+	}
+	jwt, err := auth.NewJWT(cfg.JWTSigningKey, cfg.JWTTTL)
+	if err != nil {
+		return err
+	}
+	st := store.NewStore(database.Pool)
+	authH := auth.NewHandler(wa, jwt, st)
+
 	log.Info("api starting", "public_url", cfg.PublicURL, "test_mode", cfg.TestMode)
 
-	srv := server.New(cfg, database, log)
+	srv := server.New(cfg, database, log, authH)
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
