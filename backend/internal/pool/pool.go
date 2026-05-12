@@ -1,6 +1,6 @@
-// Package db wraps the application's Postgres connection pool and provides
+// Package pool wraps the application's Postgres connection pool and provides
 // goose-based migrations.
-package db
+package pool
 
 import (
 	"context"
@@ -21,17 +21,17 @@ type DB struct {
 }
 
 func Connect(ctx context.Context, databaseURL string) (*DB, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	p, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("create pgx pool: %w", err)
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
+	if err := p.Ping(pingCtx); err != nil {
+		p.Close()
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
-	return &DB{Pool: pool, dsn: databaseURL}, nil
+	return &DB{Pool: p, dsn: databaseURL}, nil
 }
 
 func (db *DB) Close() {
@@ -47,10 +47,6 @@ func (db *DB) Ping(ctx context.Context) error {
 	return db.Pool.Ping(ctx)
 }
 
-// Migrate applies all pending goose migrations from migrationsFS (typically an
-// embed.FS pointing at migration SQL files). Migrations run on a separate
-// database/sql connection because goose requires that interface; the
-// application's pgxpool is untouched.
 func (db *DB) Migrate(migrationsFS fs.FS) error {
 	if db == nil || db.dsn == "" {
 		return errors.New("db not initialized")

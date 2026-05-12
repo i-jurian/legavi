@@ -12,19 +12,21 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/i-jurian/legavi/backend/internal/auth"
 	"github.com/i-jurian/legavi/backend/internal/config"
-	"github.com/i-jurian/legavi/backend/internal/db"
+	"github.com/i-jurian/legavi/backend/internal/pool"
 )
 
 type Server struct {
 	cfg    *config.Config
-	db     *db.DB
+	db     *pool.DB
 	log    *slog.Logger
+	auth   *auth.Handler
 	apiSrv *http.Server
 }
 
-func New(cfg *config.Config, database *db.DB, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, db: database, log: log}
+func New(cfg *config.Config, database *pool.DB, log *slog.Logger, authH *auth.Handler) *Server {
+	s := &Server{cfg: cfg, db: database, log: log, auth: authH}
 	s.apiSrv = &http.Server{
 		Addr:              cfg.APIListen,
 		Handler:           s.apiRoutes(),
@@ -41,10 +43,11 @@ func (s *Server) apiRoutes() http.Handler {
 
 	r.Get("/healthz", s.healthz)
 	r.Get("/readyz", s.readyz)
+	r.Post("/api/v1/auth/register/start", s.auth.RegisterStart)
+	r.Post("/api/v1/auth/register/verify", s.auth.RegisterVerify)
 	return r
 }
 
-// Start runs the API listener until ctx is cancelled or the listener errors.
 func (s *Server) Start(ctx context.Context) error {
 	apiErr := make(chan error, 1)
 

@@ -2,8 +2,13 @@
 
 COMPOSE_FILE := deploy/docker/compose.yaml
 
-dev:
-	docker compose -f $(COMPOSE_FILE) up -d
+dev: dev-up dev-be
+
+dev-up:
+	docker compose -f $(COMPOSE_FILE) up -d --wait postgres mailhog
+
+dev-be:
+	cd backend && go run ./cmd/api 
 
 dev-down:
 	docker compose -f $(COMPOSE_FILE) down
