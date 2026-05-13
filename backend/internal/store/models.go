@@ -49,7 +49,7 @@ type Credential struct {
 	Transports   []string
 	Aaguid       pgtype.UUID
 	AgeRecipient string
-	Nickname     *string
+	Nickname     string
 	CreatedAt    pgtype.Timestamptz
 	LastUsedAt   pgtype.Timestamptz
 	DeletedAt    pgtype.Timestamptz

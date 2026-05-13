@@ -54,6 +54,7 @@ func (s *Server) apiRoutes() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.auth.RequireSession)
 		r.Post("/api/v1/auth/logout", s.auth.Logout)
+		r.Get("/api/v1/auth/me", s.auth.Me)
 	})
 
 	return r

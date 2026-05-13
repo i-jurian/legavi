@@ -34,7 +34,7 @@ type registerStartRequest struct {
 
 type registerVerifyRequest struct {
 	AgeRecipient string          `json:"ageRecipient"`
-	Nickname     *string         `json:"nickname,omitempty"`
+	Nickname     string          `json:"nickname"`
 	Response     json.RawMessage `json:"response"`
 }
 
@@ -44,6 +44,12 @@ type loginStartRequest struct {
 
 type loginVerifyRequest struct {
 	Response json.RawMessage `json:"response"`
+}
+
+type meResponse struct {
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"displayName"`
 }
 
 func NewHandler(wa *WebAuthn, j *JWT, s *store.Store, c *Cookies) *Handler {
@@ -142,8 +148,9 @@ func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if req.AgeRecipient == "" {
-		http.Error(w, "ageRecipient required", http.StatusBadRequest)
+	nickname := strings.TrimSpace(req.Nickname)
+	if req.AgeRecipient == "" || nickname == "" {
+		http.Error(w, "ageRecipient and nickname required", http.StatusBadRequest)
 		return
 	}
 
@@ -190,7 +197,7 @@ func (h *Handler) RegisterVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Persist new credential for this user
-	if _, err := h.store.CreateCredential(r.Context(), user.ID.Bytes, credential, req.AgeRecipient, req.Nickname); err != nil {
+	if _, err := h.store.CreateCredential(r.Context(), user.ID.Bytes, credential, req.AgeRecipient, nickname); err != nil {
 		http.Error(w, "save credential failed", http.StatusInternalServerError)
 		return
 	}
@@ -364,4 +371,23 @@ func (h *Handler) LoginVerify(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	h.cookies.ClearSession(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	user, err := h.store.GetUser(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(meResponse{
+		ID:          userID.String(),
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+	})
 }

@@ -30,6 +30,10 @@ func (s *Store) CreateUser(ctx context.Context, email, displayName string) (User
 	})
 }
 
+func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
+	return s.Queries.GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
+}
+
 func (s *Store) CreateSession(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -62,7 +66,7 @@ func (s *Store) CreateCredential(
 	userID uuid.UUID,
 	cred *webauthn.Credential,
 	ageRecipient string,
-	nickname *string,
+	nickname string,
 ) (Credential, error) {
 	transports := make([]string, len(cred.Transport))
 	for i, t := range cred.Transport {

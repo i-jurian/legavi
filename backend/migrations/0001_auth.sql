@@ -18,7 +18,7 @@ CREATE TABLE credentials (
     transports    TEXT[],
     aaguid        UUID,
     age_recipient TEXT NOT NULL,
-    nickname      TEXT,
+    nickname      TEXT NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at  TIMESTAMPTZ,
     deleted_at    TIMESTAMPTZ
