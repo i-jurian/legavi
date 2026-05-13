@@ -35,7 +35,7 @@ export function RegisterPage() {
       const response = await startRegistration({ optionsJSON: publicKey });
       await registerVerify({
         ageRecipient: PLACEHOLDER_AGE_RECIPIENT,
-        nickname: nickname.trim() || undefined,
+        nickname: nickname.trim(),
         response,
       });
       await navigate({ to: "/dashboard" });
@@ -84,12 +84,13 @@ export function RegisterPage() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="nickname">Device nickname (optional)</Label>
+              <Label htmlFor="nickname">Device nickname</Label>
               <Input
                 id="nickname"
                 type="text"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
+                required
                 placeholder="e.g. MacBook"
               />
             </div>

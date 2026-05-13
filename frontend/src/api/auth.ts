@@ -14,7 +14,7 @@ type RegisterStartBody = {
 
 type RegisterVerifyBody = {
   ageRecipient: string;
-  nickname?: string;
+  nickname: string;
   response: RegistrationResponseJSON;
 };
 
@@ -98,4 +98,21 @@ export async function logout(): Promise<void> {
   if (!res.ok) {
     throw new Error(`logout failed: ${res.status} ${await res.text()}`);
   }
+}
+
+export type Me = {
+  id: string;
+  email: string;
+  displayName: string;
+};
+
+export async function me(): Promise<Me> {
+  const res = await fetch(`${BASE}/me`, {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`me failed: ${res.status}`);
+  }
+  return res.json();
 }

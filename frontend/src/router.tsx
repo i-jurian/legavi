@@ -3,7 +3,9 @@ import {
   createRoute,
   createRouter,
   Outlet,
+  redirect,
 } from "@tanstack/react-router";
+import { me } from "@/api/auth";
 import { DashboardPage } from "./routes/dashboard";
 import { LoginPage } from "./routes/login";
 import { RegisterPage } from "./routes/register";
@@ -33,6 +35,13 @@ const loginRoute = createRoute({
 const dashboardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dashboard",
+  beforeLoad: async () => {
+    try {
+      await me();
+    } catch {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: DashboardPage,
 });
 

@@ -46,7 +46,7 @@ type CreateCredentialParams struct {
 	Transports   []string
 	Aaguid       pgtype.UUID
 	AgeRecipient string
-	Nickname     *string
+	Nickname     string
 }
 
 func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialParams) (Credential, error) {
