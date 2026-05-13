@@ -2,6 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { startRegistration } from "@simplewebauthn/browser";
 import { registerStart, registerVerify } from "@/api/auth";
+import { deriveAgeKeypair } from "@/lib/age-keypair";
+import { readPRFFirst } from "@/lib/webauthn-prf";
+import { useCryptoSession } from "@/stores/cryptoSession";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,9 +17,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-const PLACEHOLDER_AGE_RECIPIENT =
-  "age1placeholder0000000000000000000000000000000000000000000000000";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -33,11 +33,21 @@ export function RegisterPage() {
     try {
       const { publicKey } = await registerStart({ email, displayName });
       const response = await startRegistration({ optionsJSON: publicKey });
+
+      const prfBytes = readPRFFirst(response);
+      if (!prfBytes) {
+        throw new Error(
+          "This passkey doesn't support PRF. Try a different authenticator.",
+        );
+      }
+      const { recipient } = deriveAgeKeypair(prfBytes);
+
       await registerVerify({
-        ageRecipient: PLACEHOLDER_AGE_RECIPIENT,
+        ageRecipient: recipient,
         nickname: nickname.trim(),
         response,
       });
+      useCryptoSession.getState().unlock(prfBytes);
       await navigate({ to: "/dashboard" });
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") {
