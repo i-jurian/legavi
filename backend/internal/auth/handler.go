@@ -103,7 +103,7 @@ func (h *Handler) RegisterStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Begin registration ceremony
-	options, sessionData, err := h.webauthn.BeginRegistration(waUser)
+	options, sessionData, err := h.webauthn.BeginRegistration(waUser, webauthn.WithExtensions(ageIdentityExtensions()))
 	if err != nil {
 		http.Error(w, "begin registration failed", http.StatusInternalServerError)
 		return
@@ -254,7 +254,7 @@ func (h *Handler) LoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Begin login ceremony
-	options, sessionData, err := h.webauthn.BeginLogin(waUser)
+	options, sessionData, err := h.webauthn.BeginLogin(waUser, webauthn.WithAssertionExtensions(ageIdentityExtensions()))
 	if err != nil {
 		http.Error(w, "begin login failed", http.StatusInternalServerError)
 		return

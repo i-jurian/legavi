@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { loginStart, loginVerify } from "@/api/auth";
+import { readPRFFirst } from "@/lib/webauthn-prf";
+import { useCryptoSession } from "@/stores/cryptoSession";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,7 +30,16 @@ export function LoginPage() {
     try {
       const { publicKey } = await loginStart({ email });
       const response = await startAuthentication({ optionsJSON: publicKey });
+
+      const prfBytes = readPRFFirst(response);
+      if (!prfBytes) {
+        throw new Error(
+          "This passkey doesn't support PRF. Try a different authenticator.",
+        );
+      }
+
       await loginVerify({ response });
+      useCryptoSession.getState().unlock(prfBytes);
       await navigate({ to: "/dashboard" });
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") {

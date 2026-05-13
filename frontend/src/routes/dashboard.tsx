@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { logout } from "@/api/auth";
+import { useCryptoSession } from "@/stores/cryptoSession";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,6 +23,7 @@ export function DashboardPage() {
     setBusy(true);
     try {
       await logout();
+      useCryptoSession.getState().lock();
       await navigate({ to: "/login" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "logout failed");
