@@ -7,7 +7,7 @@ Tracks milestone progress. When in doubt, this overrides the specs about current
 | Milestone                                        | Status      | Notes |
 | ------------------------------------------------ | ----------- | ----- |
 | M0 - Scaffold                                    | Done        |       |
-| M1 - WebAuthn authentication                     | Partial     |       |
+| M1 - WebAuthn authentication                     | Done        |       |
 | M2 - Vault entries                               | Not started |       |
 | M3 - Contacts and per-entry recipient assignment | Not started |       |
 | M4 - Release state machine                       | Not started |       |
