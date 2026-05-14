@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { loginStart, loginVerify } from "@/api/auth";
-import { readPRFFirst } from "@/lib/webauthn-prf";
-import { useCryptoSession } from "@/stores/cryptoSession";
+import { decodePRFInput, readPRFFirst } from "@/lib/prf";
+import { useCryptoSession } from "@/store/cryptoSession";
+import { LOCK_REASON_KEY, type LockReason } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,11 +18,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
+const LOCK_MESSAGES: Record<LockReason, string> = {
+  idle: "Signed out after 5 minutes of inactivity.",
+  hidden: "Signed out after this tab was hidden.",
+  expired: "Session expired. Sign in again.",
+};
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lockMessage] = useState<string | null>(() => {
+    const reason = sessionStorage.getItem(LOCK_REASON_KEY) as LockReason | null;
+    if (!reason || !(reason in LOCK_MESSAGES)) return null;
+    sessionStorage.removeItem(LOCK_REASON_KEY);
+    return LOCK_MESSAGES[reason];
+  });
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +42,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       const { publicKey } = await loginStart({ email });
+      decodePRFInput(publicKey);
       const response = await startAuthentication({ optionsJSON: publicKey });
 
       const prfBytes = readPRFFirst(response);
@@ -74,6 +88,11 @@ export function LoginPage() {
                 autoComplete="email"
               />
             </div>
+            {lockMessage && !error && (
+              <Alert>
+                <AlertDescription>{lockMessage}</AlertDescription>
+              </Alert>
+            )}
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>

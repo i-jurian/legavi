@@ -3,8 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { startRegistration } from "@simplewebauthn/browser";
 import { registerStart, registerVerify } from "@/api/auth";
 import { deriveAgeKeypair } from "@/lib/age-keypair";
-import { readPRFFirst } from "@/lib/webauthn-prf";
-import { useCryptoSession } from "@/stores/cryptoSession";
+import { decodePRFInput, readPRFFirst } from "@/lib/prf";
+import { useCryptoSession } from "@/store/cryptoSession";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +32,7 @@ export function RegisterPage() {
     setBusy(true);
     try {
       const { publicKey } = await registerStart({ email, displayName });
+      decodePRFInput(publicKey);
       const response = await startRegistration({ optionsJSON: publicKey });
 
       const prfBytes = readPRFFirst(response);
