@@ -1,106 +1,91 @@
 # 05 - API Specification
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
-HTTP API. The OpenAPI source-of-truth lives at `backend/api/openapi.yaml`; this document explains design intent and consolidates the endpoint surface.
+HTTP API. The handlers in [backend/internal/auth](../backend/internal/auth) are the source of truth; no OpenAPI document yet.
 
 ## 1. Conventions
 
-- **Base path:** `/api/v1/...`. All endpoints are versioned.
-- **Transport:** JSON over HTTPS. TLS 1.3 minimum.
-- **Authentication:** JWT in the `Authorization: Bearer <token>` header for authenticated endpoints. Refresh token in an httponly cookie.
-- **CSRF:** double-submit cookie. The `X-CSRF-Token` header must match the value in the `_csrf` cookie for state-changing requests.
-- **Idempotency:** state-changing requests accept an `Idempotency-Key` header. The server stores recent keys and short-circuits duplicates.
-- **Errors:** consistent error shape (see section 13).
-- **Rate limits:** per-IP and per-user limits documented per endpoint group.
-- **Content type:** request/response bodies are `application/json` unless noted.
+- **Base path:** `/api/v1/...`.
+- **Transport:** JSON over HTTPS (TLS 1.3 in production). Dev runs over HTTP via Vite's proxy.
+- **Authentication:** session JWT in `lgv_session` (httponly, `SameSite=Strict`, `Path=/`, `Secure` over HTTPS, `Max-Age=LGV_JWT_TTL`). No `Authorization` header or refresh token. Browsers send `credentials: "include"`. Ceremony cookie `lgv_webauthn_session` (`/api/v1/auth`, 5 min) bridges `*/start` -> `*/verify`.
+- **CSRF:** `SameSite=Strict` on `lgv_session` is the mitigation. No double-submit token.
+- **Idempotency:** no `Idempotency-Key` header. Worker-side dedup via `jobs.dedup_key`; request-path duplicates fall to unique constraints.
+- **Errors:** plain text body + HTTP status. No JSON envelope.
+- **Rate limits:** one per-IP bucket over `/api/*`; `/healthz` and `/readyz` are outside it (section 11).
+- **Content type:** `application/json`; field naming is `camelCase`.
 
 ## 2. Authentication endpoints
 
+Ceremony endpoints are anonymous; `logout` and `me` require `lgv_session`. The `response` field on verify endpoints is the full JSON from `@simplewebauthn/browser`.
+
 ### 2.1 `POST /api/v1/auth/register/start`
 
-Begin WebAuthn registration. Anonymous (no auth required).
+Begin WebAuthn registration. New email creates a `users` row; orphan row (email, zero credentials) is reused; 409 if the email already has a credential.
 
 **Request:**
 
 ```json
 {
   "email": "user@example.com",
-  "display_name": "User Name"
+  "displayName": "User Name"
 }
 ```
 
-**Response 200:**
+**Response 200:** go-webauthn `CredentialCreation`, wrapped under `publicKey`:
 
 ```json
 {
-  "challenge": "base64url-...",
-  "rp": { "name": "Legavi", "id": "vault.example.com" },
-  "user": {
-    "id": "base64url-...",
-    "name": "user@example.com",
-    "displayName": "User Name"
-  },
-  "pubKeyCredParams": [
-    { "alg": -7, "type": "public-key" },
-    { "alg": -8, "type": "public-key" }
-  ],
-  "authenticatorSelection": {
-    "userVerification": "required",
-    "residentKey": "required"
-  },
-  "extensions": { "prf": { "eval": { "first": "base64url-..." } } }
+  "publicKey": {
+    "rp": { "name": "Legavi", "id": "localhost" },
+    "user": {
+      "id": "base64url-...",
+      "name": "user@example.com",
+      "displayName": "User Name"
+    },
+    "challenge": "base64url-...",
+    "pubKeyCredParams": [
+      { "alg": -7, "type": "public-key" },
+      { "alg": -8, "type": "public-key" }
+    ],
+    "authenticatorSelection": {
+      "userVerification": "required",
+      "residentKey": "required"
+    },
+    "extensions": { "prf": { "eval": { "first": "base64url-..." } } }
+  }
 }
 ```
 
+Also sets the `lgv_webauthn_session` ceremony cookie.
+
 **Errors:**
 
-- `400` if email is malformed.
-- `409` if email is already registered (with constant-time delay to mitigate enumeration).
-
-**Rate limit:** 10/min per IP.
+- `400` empty `email` or `displayName`.
+- `409` email already has a credential.
 
 ### 2.2 `POST /api/v1/auth/register/verify`
 
-Submit attestation to complete registration.
+Submit attestation. Requires the ceremony cookie.
 
 **Request:**
 
 ```json
 {
-  "challenge_id": "uuid-...",
-  "credential_id": "base64url-...",
-  "public_key": "base64url-... (COSE)",
-  "attestation_object": "base64url-...",
-  "client_data_json": "base64url-...",
-  "age_recipient": "age1...",
-  "transports": ["internal", "hybrid"]
+  "ageRecipient": "age1...",
+  "nickname": "MacBook",
+  "response": { "id": "...", "rawId": "...", "response": { "...": "RegistrationResponseJSON from @simplewebauthn/browser" }, "clientExtensionResults": { "prf": { "results": { "first": "..." } } }, "type": "public-key" }
 }
 ```
 
-**Response 200:**
+`ageRecipient` is the bech32 `age1...` derived in the browser from the PRF output. `nickname` is a device label shown in settings.
 
-```json
-{
-  "user_id": "uuid-...",
-  "session": { "access_token": "eyJ...", "expires_in": 900 }
-}
-```
-
-Refresh token is set in an httponly cookie (`refresh_token`).
+**Response 200:** empty body. Sets `lgv_session`; clears the ceremony cookie.
 
 **Errors:**
 
-- `400` for invalid attestation, expired challenge, or signature mismatch.
-- `409` if credential ID is already registered.
+- `400` malformed JSON or attestation; empty `ageRecipient` or `nickname`.
+- `401` missing/expired ceremony cookie or attestation verification failure.
 
 ### 2.3 `POST /api/v1/auth/login/start`
-
-Begin authentication. Anonymous.
 
 **Request:**
 
@@ -108,52 +93,64 @@ Begin authentication. Anonymous.
 { "email": "user@example.com" }
 ```
 
-**Response 200:** WebAuthn `PublicKeyCredentialRequestOptions` with challenge and `allowCredentials` for the user.
+**Response 200:** go-webauthn `CredentialAssertion` wrapped under `publicKey`, with `allowCredentials` for the user and the same PRF salt as registration:
 
-For unknown emails, the response is constant-time-padded and indistinguishable from a real account challenge (mitigates email enumeration).
+```json
+{
+  "publicKey": {
+    "challenge": "base64url-...",
+    "allowCredentials": [
+      { "type": "public-key", "id": "base64url-...", "transports": ["internal"] }
+    ],
+    "userVerification": "required",
+    "extensions": { "prf": { "eval": { "first": "base64url-..." } } }
+  }
+}
+```
 
-**Rate limit:** 30/min per IP.
+Also sets the ceremony cookie.
+
+**Errors:**
+
+- `400` empty email.
+- `401` unknown email or no credentials. Email existence is enumerable here (see [Threat Model section 4](01-threat-model.md)).
 
 ### 2.4 `POST /api/v1/auth/login/verify`
-
-Submit assertion to complete authentication.
 
 **Request:**
 
 ```json
 {
-  "challenge_id": "uuid-...",
-  "credential_id": "base64url-...",
-  "authenticator_data": "base64url-...",
-  "client_data_json": "base64url-...",
-  "signature": "base64url-..."
+  "response": { "id": "...", "rawId": "...", "response": { "...": "AuthenticationResponseJSON from @simplewebauthn/browser" }, "clientExtensionResults": { "prf": { "results": { "first": "..." } } }, "type": "public-key" }
 }
 ```
 
-**Response 200:** same shape as `register/verify`.
+**Response 200:** empty body. Sets `lgv_session`; clears the ceremony cookie. Updates `sign_count` and `last_used_at` on the credential.
 
 **Errors:**
 
-- `400` for invalid signature.
-- `401` if signature doesn't match stored public key.
+- `400` malformed JSON or assertion.
+- `401` missing ceremony cookie or assertion verification failure.
 
-### 2.5 `POST /api/v1/auth/refresh`
+### 2.5 `POST /api/v1/auth/logout`
 
-Rotate access token using refresh cookie.
+Authenticated. Clears `lgv_session`. **Response 204.** Anonymous request returns `401`.
+
+### 2.6 `GET /api/v1/auth/me`
+
+Authenticated. Used by the frontend route guard.
 
 **Response 200:**
 
 ```json
-{ "access_token": "eyJ...", "expires_in": 900 }
+{
+  "id": "uuid-...",
+  "email": "user@example.com",
+  "displayName": "User Name"
+}
 ```
 
-A new refresh token replaces the old one in the cookie. Old refresh token is invalidated server-side.
-
-### 2.6 `POST /api/v1/auth/logout`
-
-Invalidate refresh token, clear cookies.
-
-**Response 204.**
+**Errors:** `401` if the cookie is missing/expired or the user no longer exists.
 
 ## 3. Check-in endpoint
 
@@ -175,7 +172,7 @@ Record an owner check-in. Resets the inactivity timer.
 
 If the current state is `COOLING` or `FINAL_HOLD`, the response includes a `cancellation_confirmation` field acknowledging that the release was halted.
 
-This endpoint is also implicitly called on every authenticated request via middleware; the explicit endpoint exists for clients that want to check in without performing another action.
+Also implicit on every authenticated request via middleware.
 
 ## 4. Vault entries endpoints
 
@@ -233,7 +230,7 @@ Create a new entry.
 }
 ```
 
-The browser zips the user's selected files in memory and age-encrypts the bundle to the recipient set (owner + zero or more assigned contacts). The server stores the opaque ciphertext and validates that all `recipient_contact_ids` are verified contacts of the user. An empty `recipient_contact_ids` array creates an owner-only entry that never enters the release flow.
+Server validates `recipient_contact_ids` against the user's verified contacts. Empty list creates an owner-only entry that never enters the release flow.
 
 **Response 201:** the created entry record.
 
@@ -241,7 +238,7 @@ The browser zips the user's selected files in memory and age-encrypts the bundle
 
 Update an existing entry. Same shape as create.
 
-If `recipient_contact_ids` changes, the browser MUST re-encrypt and submit fresh ciphertext for the new recipient set. The server enforces that the recipient list in the request matches the recipients embedded in the age header (a basic consistency check; the cryptographic enforcement is age's own).
+If `recipient_contact_ids` changes, the browser MUST submit fresh ciphertext encrypted to the new set. The server checks the request list matches the age header (consistency only; cryptographic enforcement is age's own).
 
 ### 4.4 `DELETE /api/v1/vault/entries/{id}`
 
@@ -323,7 +320,7 @@ Authenticated endpoint for the owner during the final hold to flag a false posit
 
 ### 6.4 `POST /api/v1/recover/{token}`
 
-Anonymous endpoint for a designated recipient to retrieve their assigned ciphertexts after release fires. The token is delivered via the recipient's release-notification email. The recipient completes a WebAuthn ceremony and the server returns the ciphertexts they're assigned to.
+Recipient completes WebAuthn against the token (delivered via release-notification email); server returns ciphertexts assigned to that contact.
 
 ## 7. Audit log endpoints
 
@@ -355,7 +352,7 @@ Download the full audit log + checkpoints as a single JSON document for the owne
 
 ### 8.1 `POST /api/v1/backup/export`
 
-Generate an age-encrypted backup. The browser performs the encryption; the server only assembles the input (vault entries + contact metadata + audit chain head).
+Server assembles vault entries + contact metadata + audit chain head for the browser to encrypt.
 
 **Request:**
 
@@ -367,55 +364,38 @@ Generate an age-encrypted backup. The browser performs the encryption; the serve
 
 ### 8.2 `POST /api/v1/backup/import`
 
-Import a backup. The browser decrypts; the server receives the new vault state and writes it (replacing or merging per the user's choice in the UI).
+Server persists the decrypted vault state (replace or merge per UI choice).
 
 ## 9. Health
 
 ### 9.1 `GET /healthz`
 
-Liveness probe. Returns `200 OK` always (process is responsive).
+Liveness probe. Returns `200` with JSON `{"status":"ok"}`. Outside the rate limiter.
 
 ### 9.2 `GET /readyz`
 
-Readiness probe. Returns `200 OK` when DB connection is healthy; `503` otherwise.
+Readiness probe. Pings the database with a 2-second timeout. Returns `200` with `{"status":"ready"}` on success, or `503` with `{"status":"db unavailable","error":"..."}` on failure. Outside the rate limiter.
 
-A `/metrics` endpoint is deferred to M7.
+## 10. Test mode endpoints
 
-## 10. CSRF endpoint
+Gated by `LGV_TEST_MODE=true`.
 
-### 10.1 `GET /api/v1/csrf`
-
-Issue a fresh CSRF token. Sets the `_csrf` cookie and returns the same value in the response body. Browser sends the value as `X-CSRF-Token` on subsequent state-changing requests.
-
-## 11. Test mode endpoints
-
-These endpoints exist only when `LGV_TEST_MODE=true`. The server refuses to start with this flag in a production-detected environment.
-
-### 11.1 `POST /api/v1/test/fast-forward`
+### 10.1 `POST /api/v1/test/fast-forward`
 
 Advance the simulated clock by a duration. Used by E2E tests for the release state machine.
 
-### 11.2 `POST /api/v1/test/email-inbox`
+### 10.2 `POST /api/v1/test/email-inbox`
 
 Return MailHog inbox contents for the test environment.
 
-## 12. Rate limiting
+## 11. Rate limiting
 
-Per-IP and per-user. Limits documented per endpoint where they deviate from the default. Default: 100 requests/minute per authenticated user, 60 requests/minute per anonymous IP.
+One per-IP token bucket over `/api/*`. `/healthz` and `/readyz` are exempt.
 
-Rate-limit responses use `429 Too Many Requests` with `Retry-After` header.
+- **Limit:** burst 10, then 1 token / 6 s (sustained 10/min per IP).
+- **Client IP:** `RemoteAddr` only; no `X-Forwarded-For`. Terminate TLS on the same host.
+- **IPv6:** bucketed by `/64` to block rotation bypass.
+- **Idle cleanup:** entries unused for one hour are swept.
+- **Exceeded:** `429` with `rate limit exceeded` body. No `Retry-After`.
 
-## 13. Error format
-
-```json
-{
-  "error": {
-    "code": "INVALID_RECIPIENT",
-    "message": "Recipient is not a verified contact of this user.",
-    "details": { "contact_id": "uuid-..." }
-  },
-  "request_id": "uuid-..."
-}
-```
-
-All error responses include the request correlation ID. The `code` is a stable string for client-side handling; `message` is human-readable English; `details` is optional structured context.
+No per-user bucket; passkey auth has no password to brute-force.

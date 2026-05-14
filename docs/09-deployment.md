@@ -1,11 +1,5 @@
 # 09 - Deployment Guide
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
 Development and production deployment. The MVP target is solo self-hosted via Docker Compose.
 
 ## 1. Prerequisites
@@ -29,44 +23,40 @@ make dev
 
 `make dev` brings up:
 
-- Postgres 16 on `localhost:5432`
-- MailHog (SMTP catch-all) on `localhost:1025` (SMTP) and `localhost:8025` (web UI)
-- Caddy reverse proxy on `localhost:8080`
-- Backend API server (rebuilt on file changes)
-- Frontend dev server (Vite HMR) on `localhost:5173`
+- Postgres 18 on `localhost:5432` (Docker Compose, `deploy/docker/compose.yaml`)
+- MailHog on `localhost:1025` (SMTP) and `localhost:8025` (UI)
+- Backend on `localhost:8080` via `go run ./cmd/api` (no auto-reload)
+- Frontend on `localhost:5173` (Vite HMR)
 
-Access the app at `http://localhost:8080` (proxied) or `http://localhost:5173` (direct frontend with API proxy).
-
-Stop:
+Open `http://localhost:5173`; the frontend proxies `/api/*` to `:8080`. The compose file's Caddy entry is commented out.
 
 ```bash
-make dev-down
+make dev-down   # stop Docker services; Ctrl-C the foreground processes
 ```
 
 ## 3. Configuration
 
-All configuration is environment-variable based ([Architecture section 7](03-architecture.md)). For development, defaults in `deploy/docker/.env.example` are sufficient. Copy to `.env`:
+For development, defaults in `deploy/docker/.env.example` work:
 
 ```bash
 cp deploy/docker/.env.example deploy/docker/.env
 # edit if needed
 ```
 
-Required for production deployment (no defaults):
+All variables in [Architecture section 7](03-architecture.md#7-configuration) are required at startup. Deployment-relevant summary:
 
-| Variable              | Purpose                                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `LGV_PUBLIC_URL`      | Full https URL of the public deployment (e.g., `https://vault.example.com`)                                                          |
-| `LGV_DATABASE_URL`    | Postgres connection string                                                                                                           |
-| `LGV_JWT_SIGNING_KEY` | 32+ random bytes, base64                                                                                                             |
-| `LGV_SMTP_URL`        | SMTP relay URL (e.g., `smtp://user:pass@smtp.example.com:587`)                                                                       |
-| `LGV_FROM_EMAIL`      | "From" address on outbound mail. Configure SPF, DKIM, and DMARC for the sending domain; release notifications must reach recipients. |
+| Variable              | Example                                  | Purpose                                                                  |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------ |
+| `LGV_PUBLIC_URL`      | `https://vault.example.com`              | Public URL; WebAuthn RP ID is its hostname                               |
+| `LGV_DATABASE_URL`    | `postgres://user:pass@db:5432/legavi`    | Postgres connection string                                               |
+| `LGV_JWT_SIGNING_KEY` | `openssl rand -base64 32`                | Session JWT key; decodes to >= 32 bytes                                  |
+| `LGV_JWT_TTL`         | `24h`                                    | `lgv_session` lifetime; any `time.ParseDuration` value                   |
+| `LGV_API_LISTEN`      | `:8080`                                  | Bind address                                                             |
+| `LGV_SMTP_URL`        | `smtp://user:pass@smtp.example.com:587`  | SMTP relay                                                               |
+| `LGV_FROM_EMAIL`      | `noreply@vault.example.com`              | From address; configure SPF / DKIM / DMARC for the sending domain        |
+| `LGV_LOG_LEVEL`       | `info`                                   | `debug`, `info`, `warn`, `error`                                         |
+| `LGV_TEST_MODE`       | `false`                                  | Must be `false` in production                                            |
 
-Generate a JWT signing key:
-
-```bash
-openssl rand -base64 32
-```
 
 ## 4. Production topology (single-host)
 
