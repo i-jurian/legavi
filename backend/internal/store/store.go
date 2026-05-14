@@ -31,7 +31,7 @@ func (s *Store) CreateUser(ctx context.Context, email, displayName string) (User
 }
 
 func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
-	return s.Queries.GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	return s.GetUserByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
 }
 
 func (s *Store) CreateSession(
@@ -86,7 +86,7 @@ func (s *Store) CreateCredential(
 }
 
 func (s *Store) ListUserWebAuthnCredentials(ctx context.Context, userID uuid.UUID) ([]webauthn.Credential, error) {
-	rows, err := s.Queries.ListUserCredentials(ctx, pgtype.UUID{Bytes: userID, Valid: true})
+	rows, err := s.ListUserCredentials(ctx, pgtype.UUID{Bytes: userID, Valid: true})
 	if err != nil {
 		return nil, err
 	}
