@@ -1,12 +1,5 @@
 # Implementation Status
 
-**Update history**
-
-- 2026-05-09: Initial draft
-- 2026-05-10: M0 closed
-
----
-
 Tracks milestone progress. When in doubt, this overrides the specs about current status.
 
 ## Milestone progress
@@ -14,7 +7,7 @@ Tracks milestone progress. When in doubt, this overrides the specs about current
 | Milestone                                        | Status      | Notes |
 | ------------------------------------------------ | ----------- | ----- |
 | M0 - Scaffold                                    | Done        |       |
-| M1 - WebAuthn authentication                     | Not started |       |
+| M1 - WebAuthn authentication                     | Partial     |       |
 | M2 - Vault entries                               | Not started |       |
 | M3 - Contacts and per-entry recipient assignment | Not started |       |
 | M4 - Release state machine                       | Not started |       |
@@ -22,4 +15,4 @@ Tracks milestone progress. When in doubt, this overrides the specs about current
 | M6 - Design polish                               | Not started |       |
 | M7 - Hardening, deployment, docs                 | Not started |       |
 
-On milestone close, update the row to Done or Partial and log the date in the Update history. Demote Done rows to Partial if implementation rots later.
+On milestone close, update the row to Done or Partial. Demote Done rows to Partial if implementation rots later.

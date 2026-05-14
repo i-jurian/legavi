@@ -1,11 +1,5 @@
 # 01 - Threat Model
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
 ## 1. Trust diagram
 
 | Party                                  | Trust level                    | What they know                                                                                     |
@@ -78,11 +72,10 @@ A determined operator can push modified frontend code that exfiltrates passkey-d
 
 - Subresource Integrity (SRI) on the deployed bundle so a modified asset fails to load.
 - Cache-Control: no-cache on `index.html` so a CSP-violating bundle replacement is short-lived.
-- Reproducible bundles would let a self-hoster verify that the deployed bundle matches the open-source code (deferred).
 
 ### 3.3 Server compromise
 
-External attacker gains unauthorized access to the server (RCE, SQL injection, leaked credentials). Outcome and mitigations are the same as the malicious-operator case (3.2). Additional baseline: dependency scanning in CI, minimal attack surface, structured logging that excludes secret material.
+External attacker gains unauthorized access to the server (RCE, SQL injection, leaked credentials). Outcome and mitigations as in 3.2, plus dependency scanning in CI and structured logging that excludes secret material.
 
 ### 3.4 Stolen owner device
 
@@ -100,8 +93,7 @@ Attacker has physical possession of the owner's primary device.
 
 **Mitigations:**
 
-- Vault locks after 5 minutes of inactivity (CryptoSession idle timeout).
-- Vault locks on tab visibility change (after 60 seconds).
+- Vault auto-locks on idle and visibility change (see [Frontend Spec section 4.2](07-frontend-spec.md#42-lock-triggers)).
 - Biometric required at every login ceremony.
 - Owner can revoke a device's passkey from another logged-in device.
 
@@ -150,8 +142,7 @@ False positive: the owner is alive but the system fires a release because the ow
 
 - Graduated reminders escalate over weeks, not days.
 - Configurable cadence per owner.
-- Final hold provides 24 hours of cancellation window after the formal trigger fires.
-- False-positive flag during the final hold revokes recipient access tokens before they're consumed.
+- Final-hold window and false-positive cancellation per [Release Orchestration section 3.3](06-release-orchestration.md).
 
 ### 3.8 Compromised passkey sync provider
 
@@ -181,6 +172,7 @@ In a solo self-hosted deployment, the developer is also the operator. Mitigation
 
 The system does not protect against:
 
+- **Email enumeration via auth endpoints.** `register/start` and `login/start` return distinguishable responses for known vs unknown emails. Mitigation deferred until a public or multi-tenant deployment exists.
 - **Quantum-capable adversaries.** X25519 and Ed25519 are classical-secure only.
 - **Compromise of the owner's primary device while logged in.** An attacker with unlocked-and-logged-in access reads what the owner can read.
 - **Coercion of designated recipients for the data assigned to them.** See 3.6.

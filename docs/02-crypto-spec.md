@@ -1,11 +1,5 @@
 # 02 - Cryptographic Specification
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
 No cryptographic primitives are implemented from scratch; everything composes existing libraries.
 
 ## Summary
@@ -36,25 +30,26 @@ The WebAuthn PRF extension derives a stable encryption identity from each user's
 | BLAKE2b / SHA-256      | Hashing for audit log chain and domain separation                  | RFC 7693 / NIST FIPS 180-4                                        |
 | Cryptographic random   | Salt, nonce, challenge generation                                  | OS RNG (`crypto/rand` on Go, `crypto.getRandomValues` on browser) |
 
-X25519, ChaCha20-Poly1305, and HKDF are used internally by `age` and WebAuthn but are never invoked directly by application code.
 
 ## 3. Identity derivation from passkey
 
 Each user (owner or contact) holds a WebAuthn passkey on their device. To derive their age encryption identity, the system invokes the WebAuthn PRF extension at authentication time with a fixed, well-known salt:
 
 ```
-prf_input = "legavi.age-identity.v1"
-prf_output = WebAuthn PRF(passkey, prf_input)  // 32 bytes
-age_private_key = X25519_clamp(prf_output)
-age_recipient = X25519_public(age_private_key)
+prf_salt      = sha256("legavi.prf.age-identity.v1")  // pinned by TestAgeIdentitySaltStability
+prf_output    = WebAuthn PRF(passkey, prf_salt)
+age_identity  = bech32("AGE-SECRET-KEY-", prf_output)
+age_recipient = bech32("age", X25519_scalar_mult_base(prf_output))
 ```
+
+`@noble/curves` and the age library clamp internally.
 
 Properties:
 
 - Deterministic: the same passkey produces the same age identity on every authentication.
 - Cross-device consistent: a platform-synced passkey produces the same PRF output on every signed-in device.
 - Hardware-bound: the passkey private material never leaves the authenticator. The PRF output is computed inside the authenticator and returned for use only after user verification (biometric or PIN).
-- Domain-separated: a separate PRF input (`legavi.audit-signing.v1`) derives the audit log signing key independently from the encryption key.
+- Domain-separated: distinct PRF inputs per use (see section 10).
 
 The age private key exists in browser memory only for the duration of an active vault session. It is zeroed on lock (idle timeout, tab visibility change, or explicit logout).
 
@@ -121,69 +116,22 @@ The owner's browser verifies the chain root against the latest signed checkpoint
 
 ### 6.1 Registration
 
-```
-1. Server generates a random challenge.
-2. Browser invokes navigator.credentials.create({
-     challenge,
-     rp: { name: "Legavi", id: "<host>" },
-     user: { id, name, displayName },
-     pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -8, type: "public-key" }],
-     authenticatorSelection: {
-       userVerification: "required",
-       residentKey: "required"
-     },
-     extensions: { prf: { eval: { first: <prf-input-bytes> } } }
-   })
-3. User completes biometric or PIN ceremony in their authenticator.
-4. Browser receives the AttestationResponse, extracts:
-   - credentialId
-   - public key (COSE format)
-   - PRF output (already computed during registration)
-5. Browser derives age identity from PRF output, retains it for the session.
-6. Browser sends to server: credentialId, public key, attestation statement.
-7. Server verifies attestation, stores credentialId + public key for the user.
-```
+`@simplewebauthn/browser`'s `startRegistration` with `userVerification: required`, `residentKey: required`, and `extensions.prf.eval.first = <prf-salt>`. The server stores `credentialId` + COSE public key; the browser derives the age identity from the returned PRF output.
 
 ### 6.2 Authentication
 
-```
-1. Server generates a random challenge.
-2. Browser invokes navigator.credentials.get({
-     challenge,
-     allowCredentials: [...],
-     userVerification: "required",
-     extensions: { prf: { eval: { first: <prf-input-bytes> } } }
-   })
-3. User completes biometric or PIN ceremony.
-4. Browser receives the AssertionResponse with PRF output.
-5. Browser derives age identity from PRF output for this session.
-6. Browser sends to server: credentialId, signature over challenge.
-7. Server verifies signature against the stored public key.
-8. Session established.
-```
-
-The PRF output never leaves the browser; the server sees only the public credential.
+`startAuthentication` with the same PRF salt. Server verifies the assertion against the stored public key; PRF output recomputes the same age identity deterministically. The PRF output never leaves the browser.
 
 ## 7. Contact onboarding
 
-```
-1. Owner enters contact's email and display name.
-2. Server emails the contact an invitation link with a one-time token.
-3. Contact clicks link, lands on registration page.
-4. Contact completes WebAuthn registration ceremony (their device, their passkey).
-5. Browser computes contact's age recipient from their PRF output.
-6. Contact's age recipient and credential are sent to the server.
-7. Owner verifies the contact's identity out-of-band by reading the contact's age recipient fingerprint to them over a known-good channel (phone, in person).
-8. Owner approves the contact, server records the verified-recipient binding.
-9. The contact is now eligible to be assigned to vault entries. The owner can then assign (or reassign) entries to this contact via the vault UI; each affected entry is re-encrypted client-side to the new recipient set.
-```
+Owner submits email + display name; server emails an invitation link with a one-time token. Contact completes a WebAuthn registration ceremony on their own device; the browser submits the derived age recipient and credential. Owner verifies the recipient fingerprint out-of-band (phone or in person) and approves. The contact is then eligible to be assigned to vault entries; affected entries are re-encrypted client-side.
 
 ## 8. Backup export
 
 The owner can export an encrypted backup of their vault. The export is a single age-encrypted file with two recipients:
 
-- The owner's current age identity (so they can decrypt with their current passkey).
-- An optional passphrase recipient (so they can decrypt with a written-down passphrase even if their passkey is lost). A passphrase backup is only as strong as the passphrase; a weak one can be guessed by anyone who obtains the export file.
+- The owner's current age identity.
+- An optional passphrase recipient (as strong as the passphrase chosen).
 
 Export format:
 
@@ -208,12 +156,12 @@ Rotation is owner-initiated and requires authentication with the current passkey
 
 PRF inputs and other derived material use distinct domain-separation tags to prevent cross-protocol confusion:
 
-| Use                        | Tag                                             |
-| -------------------------- | ----------------------------------------------- |
-| Age identity               | `legavi.age-identity.v1`                        |
-| Audit log signing          | `legavi.audit-signing.v1`                       |
-| Backup passphrase wrapping | `legavi.backup-passphrase.v1`                   |
-| Audit chain hash function  | `BLAKE2b("legavi.audit-chain.v1", entry_bytes)` |
+| Use                        | Tag (hashed with sha256 to derive PRF salt or used directly per row) |
+| -------------------------- | -------------------------------------------------------------------- |
+| Age identity               | `legavi.prf.age-identity.v1`                                         |
+| Audit log signing          | `legavi.audit-signing.v1`                                            |
+| Backup passphrase wrapping | `legavi.backup-passphrase.v1`                                        |
+| Audit chain hash function  | `BLAKE2b("legavi.audit-chain.v1", entry_bytes)`                      |
 
 Versioned suffixes allow future upgrades without ambiguity.
 
@@ -221,14 +169,14 @@ Versioned suffixes allow future upgrades without ambiguity.
 
 Every encrypted blob includes a `schema_version` integer in its associated data (or in the surrounding wrapper for primitives that don't expose AAD). Breaking changes increment the version. Readers MUST reject unknown versions; no silent fallback.
 
-Breaking changes require: bump of `schema_version` in affected blobs, a migration plan in [Architecture section 10](03-architecture.md), and tests covering both old and new versions until the deprecation window ends.
+Breaking changes require: bump of `schema_version` in affected blobs and tests covering both old and new versions until the deprecation window ends.
 
 ## 12. Implementation requirements
 
-| Requirement                                                                                                                                                                                               | Rationale                  |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| Use established libraries: `filippo.io/age` (Go); `age-encryption` npm package (browser); `@simplewebauthn/server` and `@simplewebauthn/browser` for WebAuthn; `@noble/curves/ed25519` for audit signing. | No hand-rolled primitives. |
-| All cryptographic code in a separate `crypto/` package with no business logic dependencies.                                                                                                               | Auditability.              |
-| Test vectors from RFCs and library documentation checked into `crypto/testdata/`.                                                                                                                         | Catch regressions.         |
-| Constant-time comparisons via `crypto/subtle` (Go) or `@noble/hashes/utils#equalBytes` (browser) for any equality check on secrets.                                                                       | Side-channel resistance.   |
-| No `panic` in crypto code paths; errors only.                                                                                                                                                             | Predictable failure.       |
+| Requirement                                                                                                                                                                                                                                 | Rationale                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Use established libraries: `github.com/go-webauthn/webauthn` (Go); `@simplewebauthn/browser` (frontend); `@noble/curves` for X25519 scalar multiplication and Ed25519; `age-encryption` npm package for vault encryption. | No hand-rolled primitives. |
+| Crypto code is colocated with its caller (`internal/auth/prf.go`, `frontend/src/lib/age-keypair.ts`); extracted into a dedicated `crypto/` package once the surface area justifies it. | Avoid premature isolation. |
+| PRF salt is pinned by `TestAgeIdentitySaltStability` to `sha256("legavi.prf.age-identity.v1")`. Changing it locks every user out of their vault; rotate, do not edit. | Catch accidental drift. |
+| Constant-time comparisons via `crypto/subtle` (Go) or `@noble/hashes/utils#equalBytes` (browser) for any equality check on secrets. | Side-channel resistance. |
+| No `panic` in crypto code paths; errors only.                                                                                                                                                                                               | Predictable failure.       |

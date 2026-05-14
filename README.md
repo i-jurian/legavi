@@ -9,7 +9,7 @@ The owner signs in with the device's biometric or a hardware security key. No pa
 ## What this project is
 
 1. **Per-recipient release** - each piece of data goes only to the designated recipient.
-2. **Passkey-native authentication** - no passwords, no password resets, hardware-bound credentials.
+2. **Passkey-native authentication** - hardware-bound credentials, no passwords or password resets.
 3. **End-to-end encryption** - keys derived on-device, ciphertext only on the server.
 4. **Self-hostable** - runs on chosen infrastructure. Third-party trust optional.
 5. **Graduated release** - multi-stage warnings, cooling-off period, owner-cancel window.
@@ -30,14 +30,16 @@ See [implementation status](docs/IMPLEMENTATION_STATUS.md).
 
 ```
 legavi/
-├── README.md
-├── LICENSE              # Apache 2.0
-├── docs/                # Specifications
-├── backend/             # Go HTTP API, scheduler, worker (stdlib + chi)
-├── frontend/            # React + TypeScript SPA, WebAuthn ceremonies, age decryption
-├── deploy/
-│   └── docker/          # Docker Compose for dev/local
-└── .github/             # CI, issue/PR templates
+|-- README.md
+|-- LICENSE              # Apache 2.0
+|-- Makefile             # dev / test / lint targets
+|-- lefthook.yml         # pre-commit hooks (gofmt, eslint)
+|-- docs/                # Specifications
+|-- backend/             # Go HTTP API, scheduler, worker (stdlib + chi)
+|-- frontend/            # React + TypeScript SPA, WebAuthn ceremonies, age decryption
+|-- deploy/
+|   `-- docker/          # Docker Compose for dev/local
+`-- .github/             # CI workflow
 ```
 
 ## Getting started (development)
@@ -53,12 +55,15 @@ open http://localhost:5173
 
 ### Commands
 
-| Command         | What it does                              |
-| --------------- | ----------------------------------------- |
-| `make dev`      | Spin up Postgres, MailHog, Caddy, backend |
-| `make dev-down` | Stop the dev stack                        |
-| `make test`     | Run backend + frontend tests              |
-| `make lint`     | Run backend + frontend linters            |
+| Command         | What it does                                                            |
+| --------------- | ----------------------------------------------------------------------- |
+| `make dev`      | `dev-up` + `dev-be` + `dev-fe` (concurrent)                             |
+| `make dev-up`   | Docker dependencies only                                                |
+| `make dev-be`   | Backend only                                                            |
+| `make dev-fe`   | Frontend only                                                           |
+| `make dev-down` | Stop Docker dependencies                                                |
+| `make test`     | Backend + frontend tests                                                |
+| `make lint`     | Backend + frontend linters                                              |
 
 See [Deployment Guide](docs/09-deployment.md) for production.
 

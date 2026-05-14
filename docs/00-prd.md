@@ -1,11 +1,5 @@
 # 00 - Product Requirements
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
 ## 1. Problem
 
 People accumulate digital secrets that matter to others after their death or extended incapacity: account credentials, financial logins, photo archives, business documents, instructions for survivors. Existing solutions are operator-trusted, vendor-locked, or so brittle they fail silently. The owner needs a way to:
@@ -52,7 +46,6 @@ People accumulate digital secrets that matter to others after their death or ext
 - 24-hour final hold with a false-positive cancel flag.
 - Hash-chained audit log with periodic Ed25519 signed checkpoints, visible to the owner.
 - Encrypted backup export, decryptable by the owner with their passkey or with a passphrase the owner sets at export time.
-- `docker compose up` starts a complete development stack end-to-end.
 
 ## 5. Legal context
 

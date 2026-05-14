@@ -1,12 +1,6 @@
 # 04 - Data Model
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
-Postgres schema. Migrations managed by `goose`; the schema version is recorded in a `schema_versions` table and verified at startup.
+Postgres schema. Migrations managed by `goose` (version in `goose_db_version`). Query SQL lives in `backend/internal/store/queries/*.sql`, compiled to typed Go by `sqlc`.
 
 ## 1. Conventions
 
@@ -22,6 +16,7 @@ Postgres schema. Migrations managed by `goose`; the schema version is recorded i
 ```mermaid
 erDiagram
     users ||--o{ credentials : "1:N"
+    users ||--o{ webauthn_sessions : "1:N"
     users ||--o{ vault_entries : "1:N"
     users ||--o{ contacts : "1:N"
     users ||--|| release_state : "1:1"
@@ -32,15 +27,15 @@ erDiagram
     contacts }o--o{ entry_recipients : "M:N"
 ```
 
-Standalone tables (no FK to users): `jobs` (async work queue), `schema_versions` (migration tracking), `webauthn_challenges` (short-lived ceremony state).
+Standalone: `jobs` (async work queue). Migration bookkeeping in `goose_db_version` (managed by `goose`).
 
 ## 3. Migrations
 
-Three groups landed in M0:
+Three migration groups:
 
-- **1 - Auth:** `users`, `credentials`, `webauthn_challenges`.
-- **2 - Vault and contacts:** `vault_entries`, `contacts`, `entry_recipients`.
-- **3 - Release and audit:** `release_state`, `release_offsets`, `audit_log`, `audit_checkpoints`, `jobs`.
+- **1 - Auth** (`migrations/0001_auth.sql`): `users`, `credentials`, `webauthn_sessions`.
+- **2 - Vault and contacts** (`migrations/0002_vault_contacts.sql`): `vault_entries`, `contacts`, `entry_recipients`.
+- **3 - Release and audit** (`migrations/0003_release_audit.sql`): `release_state`, `release_offsets`, `audit_log`, `audit_checkpoints`, `jobs`.
 
 ## 4. Table specifications
 
@@ -66,17 +61,17 @@ WebAuthn passkey credentials registered by a user. A user may have multiple cred
 
 ```sql
 CREATE TABLE credentials (
-    id                  BYTEA PRIMARY KEY,             -- raw credential ID from WebAuthn
-    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    public_key          BYTEA NOT NULL,                -- COSE public key
-    sign_count          BIGINT NOT NULL DEFAULT 0,
-    transports          TEXT[],                        -- e.g., ["internal", "hybrid"]
-    aaguid              UUID,                          -- authenticator AAGUID, optional
-    age_recipient       TEXT NOT NULL,                 -- bech32-encoded age recipient
-    nickname            TEXT,                          -- user-provided device label
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at        TIMESTAMPTZ,
-    deleted_at          TIMESTAMPTZ
+    id            BYTEA PRIMARY KEY,             -- raw credential ID from WebAuthn
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    public_key    BYTEA NOT NULL,                -- COSE public key
+    sign_count    BIGINT NOT NULL DEFAULT 0,
+    transports    TEXT[],                        -- e.g., ["internal", "hybrid"]
+    aaguid        UUID,                          -- authenticator AAGUID, optional
+    age_recipient TEXT NOT NULL,                 -- bech32-encoded age recipient
+    nickname      TEXT NOT NULL,                 -- user-provided device label
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at  TIMESTAMPTZ,
+    deleted_at    TIMESTAMPTZ
 );
 
 CREATE INDEX credentials_user_active_idx ON credentials(user_id) WHERE deleted_at IS NULL;
@@ -84,24 +79,24 @@ CREATE INDEX credentials_user_active_idx ON credentials(user_id) WHERE deleted_a
 
 `age_recipient` stores the user's age public key derived from the PRF output for that credential. Multiple credentials produce different age recipients only when the credentials are not synced; platform-synced passkeys produce a consistent recipient across devices.
 
-### 4.3 `webauthn_challenges`
+### 4.3 `webauthn_sessions`
 
-Short-lived challenge state for WebAuthn ceremonies.
+Short-lived ceremony state. Each row holds the JSON-marshalled go-webauthn `SessionData`, keyed by a UUID that is also written to a `lgv_webauthn_session` cookie scoped to `/api/v1/auth`. The verify step consumes the row and clears the cookie.
 
 ```sql
-CREATE TABLE webauthn_challenges (
-    id              UUID PRIMARY KEY,
-    user_id         UUID REFERENCES users(id) ON DELETE CASCADE,  -- null for registration of new users
-    challenge       BYTEA NOT NULL,
-    purpose         TEXT NOT NULL CHECK (purpose IN ('register', 'authenticate')),
-    expires_at      TIMESTAMPTZ NOT NULL,
-    consumed_at     TIMESTAMPTZ
+CREATE TABLE webauthn_sessions (
+    id           UUID PRIMARY KEY,
+    user_id      UUID REFERENCES users(id) ON DELETE CASCADE,  -- nullable schema, always populated in practice
+    session_data BYTEA NOT NULL,                                -- json-encoded go-webauthn SessionData
+    purpose      TEXT NOT NULL CHECK (purpose IN ('register', 'login')),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    consumed_at  TIMESTAMPTZ
 );
 
-CREATE INDEX webauthn_challenges_expires_idx ON webauthn_challenges(expires_at);
+CREATE INDEX webauthn_sessions_expires_idx ON webauthn_sessions(expires_at);
 ```
 
-Rows older than 5 minutes are pruned by a periodic cleanup job. Consumed challenges are kept briefly (1 hour) for replay-attack telemetry.
+5-minute TTL. Consume filters `consumed_at IS NULL AND expires_at > now()`; expired rows are inert.
 
 ### 4.4 `vault_entries`
 
@@ -123,8 +118,6 @@ CREATE TABLE vault_entries (
 CREATE INDEX vault_entries_user_active_idx ON vault_entries(user_id, sort_order)
   WHERE deleted_at IS NULL;
 ```
-
-`label_hint` is plaintext metadata the user provides for navigation. It is not part of the encrypted payload.
 
 `schema_version` allows wire-format upgrades.
 
@@ -154,10 +147,10 @@ CREATE INDEX contacts_email_user_idx ON contacts(user_id, email);
 
 Contact lifecycle:
 
-1. Owner adds → row inserted with `status='pending'`.
+1. Owner adds -> row inserted with `status='pending'`.
 2. Contact accepts invitation, registers their passkey, submits `age_recipient` and fingerprint hash.
-3. Owner verifies fingerprint out-of-band, calls approve endpoint → `status='verified'`, `verified_at` set.
-4. Owner removes → `status='removed'`, `removed_at` set; entries no longer encrypt to this recipient.
+3. Owner verifies fingerprint out-of-band, calls approve endpoint -> `status='verified'`, `verified_at` set.
+4. Owner removes -> `status='removed'`, `removed_at` set; entries no longer encrypt to this recipient.
 
 ### 4.6 `entry_recipients`
 
@@ -217,7 +210,6 @@ CREATE TABLE release_offsets (
 );
 ```
 
-Each user can adjust their own offsets.
 
 ### 4.9 `audit_log`
 
@@ -258,7 +250,7 @@ CREATE TABLE audit_checkpoints (
 CREATE INDEX audit_checkpoints_user_sequence_idx ON audit_checkpoints(user_id, sequence DESC);
 ```
 
-Owners sign at login, after release-state transitions, and every 24 hours of activity. Browser verifies the latest checkpoint on session start.
+Checkpoint cadence and verification per [Crypto Spec section 5](02-crypto-spec.md#5-audit-log).
 
 ### 4.11 `jobs`
 
@@ -287,20 +279,6 @@ CREATE INDEX jobs_locked_idx ON jobs(locked_by) WHERE status = 'running';
 ```
 
 Workers claim jobs with `UPDATE ... WHERE status = 'pending' AND run_after <= now() ... RETURNING ...` using `FOR UPDATE SKIP LOCKED` semantics. `dedup_key` prevents duplicate event handling.
-
-### 4.12 `schema_versions`
-
-Migration tracking.
-
-```sql
-CREATE TABLE schema_versions (
-    version_id  BIGINT PRIMARY KEY,
-    is_applied  BOOLEAN NOT NULL,
-    tstamp      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-This table is managed by `goose`; do not modify by hand.
 
 ## 5. Retention
 

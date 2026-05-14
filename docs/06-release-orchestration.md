@@ -1,11 +1,5 @@
 # 06 - Release Orchestration
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
 Inactivity-detection state machine and the release process. The state machine must be deterministic, recoverable, and verifiable.
 
 ## 1. State diagram
@@ -43,45 +37,32 @@ stateDiagram-v2
 
 ## 3. Transition rules
 
-The state machine is a pure function `nextState(current, releaseState, offsets, now) -> nextState`. All transitions are derived from this function deterministically.
+Transitions follow a pure function `nextState(current, releaseState, offsets, now)`.
 
 **Precondition for evaluation:** an owner is only evaluated by the scheduler if they have at least one entry currently assigned to a contact. Owners with zero contact-assigned entries stay in `ACTIVE` regardless of inactivity (no one to release to). The state machine engages the moment they make their first contact assignment, starting from their current `last_checkin_at` (reset by the assignment action itself).
 
-### 3.1 `ACTIVE` → `REMINDED_SOFT`
+### 3.1 Forward transitions
 
-When `now - last_checkin_at >= soft_after_days`. Worker sends a soft reminder email.
+| From            | To              | Trigger                                                | Side effect                                                                |
+| --------------- | --------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `ACTIVE`        | `REMINDED_SOFT` | `now - last_checkin_at >= soft_after_days`             | Worker emails owner (soft reminder)                                        |
+| `REMINDED_SOFT` | `REMINDED_FIRM` | `now - last_checkin_at >= firm_after_days`             | Worker emails owner (firm reminder)                                        |
+| `REMINDED_FIRM` | `REMINDED_FINAL`| `now - last_checkin_at >= final_after_days`            | Worker emails owner (final reminder)                                       |
+| `REMINDED_FINAL`| `COOLING`       | Final reminder sent                                    | Set `cooling_started_at = now`; worker emails recipients (cooling period)  |
+| `COOLING`       | `FINAL_HOLD`    | `now - cooling_started_at >= cooling_hours` (48h)      | Set `final_hold_until = now + final_hold_hours`; worker emails owner       |
+| `FINAL_HOLD`    | `RELEASED`      | `now >= final_hold_until AND false_positive_flag = false` | Worker emails each assigned contact a recovery link                     |
 
-### 3.2 `REMINDED_SOFT` → `REMINDED_FIRM`
-
-When `now - last_checkin_at >= firm_after_days`. Worker sends a firm reminder.
-
-### 3.3 `REMINDED_FIRM` → `REMINDED_FINAL`
-
-When `now - last_checkin_at >= final_after_days`. Worker sends the final reminder.
-
-### 3.4 `REMINDED_FINAL` → `COOLING`
-
-Immediately after the final reminder is sent. `cooling_started_at` is set to `now`. Worker emails each designated recipient: "X has not checked in. Release is in cooling period."
-
-### 3.5 `COOLING` → `FINAL_HOLD`
-
-When `now - cooling_started_at >= cooling_hours` (default 48 hours). Worker emails owner one more time: "Cooling period expired. 24-hour final hold begins. Flag false-positive in the app to cancel." `final_hold_until` is set to `now + final_hold_hours`.
-
-### 3.6 `FINAL_HOLD` → `RELEASED`
-
-When `now >= final_hold_until` AND `false_positive_flag = false`. Worker emails each contact who has at least one entry assigned to them with their recovery link. Contacts with no assignments receive nothing.
-
-### 3.7 Any state → `ACTIVE` (check-in)
+### 3.2 Any state -> `ACTIVE` (check-in)
 
 Owner makes an authenticated request (any endpoint) before `RELEASED`. `last_checkin_at` is updated; state transitions to `ACTIVE` if it was anywhere in `REMINDED_*`, `COOLING`, or `FINAL_HOLD`. Audit log records the cancellation event.
 
-### 3.8 `FINAL_HOLD` → `ACTIVE` (false-positive flag)
+### 3.3 `FINAL_HOLD` -> `ACTIVE` (false-positive flag)
 
-Owner explicitly flags false-positive. Same as 3.7 plus: any recovery tokens already issued to recipients are invalidated server-side.
+Owner explicitly flags false-positive. Same as 3.2 plus: any recovery tokens already issued are invalidated server-side.
 
-### 3.9 No transition out of `RELEASED`
+### 3.4 No transition out of `RELEASED`
 
-`RELEASED` is terminal. If a release fires but the owner is still active afterwards, recovery requires manual intervention (re-registration, re-onboarding contacts, fresh vault).
+`RELEASED` is terminal. If a release fires but the owner is still active, recovery requires re-registration, re-onboarding contacts, and a fresh vault.
 
 ## 4. Idempotency
 
@@ -101,4 +82,4 @@ When `LGV_TEST_MODE=true`, `POST /api/v1/test/fast-forward` advances a per-user 
 
 ## 7. Audit log integration
 
-Every state transition produces an audit log entry with `event_type: release_state_change` and payload `{ from, to, reason }` where `reason` is `scheduler_tick`, `checkin`, or `false_positive`. The owner's browser signs a checkpoint after every state-change event.
+Every state transition produces an audit log entry with `event_type: release_state_change` and payload `{ from, to, reason }` where `reason` is `scheduler_tick`, `checkin`, or `false_positive`. Checkpoints follow [Crypto Spec section 5](02-crypto-spec.md#5-audit-log).

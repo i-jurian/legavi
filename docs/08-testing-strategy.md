@@ -1,27 +1,23 @@
 # 08 - Testing Strategy
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
+Target posture. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for current state.
 
 ## 1. Coverage targets
 
-| Package                    | Target                 | Rationale                       |
-| -------------------------- | ---------------------- | ------------------------------- |
-| Backend `crypto/`          | 100% line, 100% branch | Every line is security-critical |
-| Frontend `src/crypto/`     | 100% line, 100% branch | Same                            |
-| `release/` (state machine) | ≥ 95%                  | Operational criticality         |
-| `api/` handlers            | ≥ 85%                  | Standard backend                |
-| `frontend/` components     | ≥ 70%                  | Lower bar; supplemented by E2E  |
-| `worker/`, `scheduler/`    | ≥ 80%                  |                                 |
+Crypto code extracts into a dedicated package (see [Crypto Spec section 12](02-crypto-spec.md)).
 
-These are floors. PRs that drop coverage below floor are blocked.
+| Package                          | Target                 | Rationale                       |
+| -------------------------------- | ---------------------- | ------------------------------- |
+| Backend `crypto/`                | 100% line, 100% branch | Every line is security-critical |
+| Frontend `src/crypto/`           | 100% line, 100% branch | Same                            |
+| `release/` (state machine)       | >= 95%                 | Operational criticality         |
+| `api/` handlers                  | >= 85%                 | Standard backend                |
+| `frontend/` components           | >= 70%                 | Lower bar; supplemented by E2E  |
+| `worker/`, `scheduler/`          | >= 80%                 |                                 |
+
+PRs that drop coverage below the floor are blocked.
 
 ## 2. Crypto testing
-
-Not much crypto code to test: thin wrappers around age, WebAuthn, and Ed25519. The tests verify our wrappers compose the libraries correctly.
 
 ### 2.1 Roundtrip and recipient correctness
 
@@ -51,7 +47,7 @@ A linter rule scans for and rejects:
 - `Math.random()` in production code.
 - AES-CBC, AES-ECB, MD5, SHA-1.
 - Any string literal that looks like a hardcoded key (high-entropy detection).
-- Direct invocation of low-level age primitives (X25519, ChaCha20-Poly1305) instead of the age library.
+- Direct invocation of low-level age primitives (X25519, ChaCha20-Poly1305) outside of the age library and the deliberate `deriveAgeKeypair` helper.
 
 ## 3. State machine testing
 
@@ -59,52 +55,11 @@ The release state machine ([Release Orchestration](06-release-orchestration.md))
 
 ### 3.1 Pure-function unit tests
 
-```go
-func TestComputeNextState(t *testing.T) {
-    cases := []struct{
-        name           string
-        currentState   State
-        lastCheckin    time.Time
-        offsets        Offsets
-        now            time.Time
-        expectedState  State
-    }{
-        {"active stays active", Active, t0, defaults, t0.Add(6*Day), Active},
-        {"active to soft after first offset", Active, t0, defaults, t0.Add(8*Day), RemindedSoft},
-        {"final to cooling at threshold", RemindedFinal, t0, defaults, t0.Add(30*Day), Cooling},
-        {"cooling to final-hold after 48h", Cooling, t0, defaults, t0.Add(30*Day + 48*Hour), FinalHold},
-        // ... covering every transition
-    }
-    for _, tc := range cases {
-        t.Run(tc.name, func(t *testing.T) {
-            got := ComputeNextState(tc.currentState, tc.lastCheckin, tc.offsets, tc.now)
-            require.Equal(t, tc.expectedState, got)
-        })
-    }
-}
-```
+Table-driven test exercises `ComputeNextState` against every transition in the state diagram, asserting the expected next state for each `(currentState, lastCheckin, offsets, now)` tuple.
 
 ### 3.2 Integration test with fake clock
 
-```go
-func TestFullReleaseSequence(t *testing.T) {
-    clock := fakeclock.New(t0)
-    db := setupTestDB(t)
-    s := NewScheduler(db, clock)
-
-    user := createUser(t, db, /* defaults */)
-    require.Equal(t, Active, getState(t, db, user))
-
-    clock.Advance(8 * Day); s.Tick(ctx)
-    require.Equal(t, RemindedSoft, getState(t, db, user))
-    require.Len(t, getEmailsTo(t, user), 1)
-
-    clock.Advance(7 * Day); s.Tick(ctx)
-    require.Equal(t, RemindedFirm, getState(t, db, user))
-
-    // ... walk through every offset to RELEASED
-}
-```
+Drive the scheduler with a fake clock through the full `ACTIVE` -> `RELEASED` path; assert state and emitted-email count at each offset boundary.
 
 ### 3.3 Property tests
 
@@ -116,14 +71,7 @@ func TestFullReleaseSequence(t *testing.T) {
 
 ### 3.4 Chaos / failure injection
 
-```go
-func TestSchedulerCrashRecovery(t *testing.T) {
-    // Start scheduler, advance to mid-transition, kill process,
-    // start new scheduler, verify no duplicate notifications.
-}
-```
-
-Also: concurrent-scheduler: two scheduler instances starting in the same tick window; only one acquires the advisory lock, no duplicate notifications.
+Kill the scheduler mid-transition and restart it: assert no duplicate notifications. Concurrent-scheduler: two instances starting in the same tick window; only the advisory-lock holder fires jobs.
 
 ### 3.5 Final-hold and false-positive scenarios
 
@@ -142,9 +90,9 @@ For every endpoint, a test for:
 
 - Happy path (valid input, expected output).
 - Each documented error condition.
-- Authentication enforcement (anonymous → 401).
-- Authorization enforcement (other user's data → 404 not 403, to prevent enumeration).
-- Recipient-validation enforcement (assign-to-non-verified-contact → 400).
+- Authentication enforcement (anonymous -> 401).
+- Authorization enforcement (other user's data -> 404 not 403, to prevent enumeration).
+- Recipient-validation enforcement (assign-to-non-verified-contact -> 400).
 
 DB isolation: each test runs inside a transaction that rolls back on completion. A shared Postgres service container is reused across tests for speed; per-test rollback prevents leakage.
 
@@ -203,26 +151,13 @@ One Playwright E2E run with `@axe-core/playwright` as a smoke test. Failures blo
 - `npm audit --audit-level=high` on every push.
 - Manual dependency review when advisories surface; PR-based bumps reviewed against the spec and re-run KAT/parity tests before merge.
 
-## 7. Performance testing
+## 7. CI pipeline
 
-No fixed performance targets. Once there is a real workload to measure, add microbenchmarks for the encrypt/decrypt hot path and a basic load smoke test on the API.
+`.github/workflows/ci.yml` runs three jobs on every push and pull request: `lint` (golangci-lint, eslint, tsc), `unit` (go test, vitest), `security-audit` (govulncheck, npm audit). A PR is mergeable when all pass.
 
-## 8. CI pipeline
-
-```yaml
-on: [push, pull_request]
-
-jobs:
-  lint:     # golangci-lint, eslint
-  unit:     # go test, vitest
-  security: # govulncheck, npm audit
-```
-
-A PR is mergeable when all jobs pass.
-
-## 9. Test data
+## 8. Test data
 
 - **Never use real user data for testing.** All fixtures are synthetic.
 - **Faker-generated** names and emails; deterministic seeds for reproducibility.
 - **No production data ever copied to development environments.**
-- `LGV_TEST_MODE=true` enables E2E-only endpoints (see [API Spec section 11](05-api-spec.md)).
+- `LGV_TEST_MODE=true` enables E2E-only endpoints (see [API Spec section 10](05-api-spec.md)).

@@ -1,20 +1,12 @@
 # 10 - Milestones
 
-**Update history**
-
-- 2026-05-09: Initial draft
-
----
-
 Each milestone has a narrow objective and a clear exit criterion.
 
 ## Milestone 0 - Scaffold
 
-The full development scaffold: dev environment, Go backend skeleton, frontend Vite scaffold, CI, and pre-commit hooks.
-
 1. Repo skeleton folders: `backend/`, `frontend/`, `deploy/docker/`, `docs/`, `.github/`.
 2. Root `Makefile` with: `dev`, `dev-down`, `test`, `test-be`, `test-fe`, `lint`, `lint-be`, `lint-fe`.
-3. Docker Compose for dev: `postgres:16`, `mailhog`, `caddy`. Backend developed via `go run` against this stack.
+3. Docker Compose for dev: `postgres:18`, `mailhog`. Backend runs via `go run`. Caddy entry commented out.
 4. Backend skeleton:
    - `cmd/api/main.go`, `cmd/scheduler/main.go`, `cmd/worker/main.go`. Each prints a structured log line and exits gracefully on signal.
    - Postgres migrations 1-3 per [Data Model section 3](04-data-model.md), applied with `goose`.
@@ -25,16 +17,14 @@ The full development scaffold: dev environment, Go backend skeleton, frontend Vi
 5. Frontend scaffold:
    - Vite + React + TypeScript + Tailwind + shadcn.
    - TanStack Router (`@tanstack/react-router`) skeleton with placeholder routes per [Frontend Spec section 2](07-frontend-spec.md).
-   - TanStack Query setup; `authStore` (Zustand) skeleton.
+   - TanStack Query setup; Zustand skeleton.
    - `CryptoSession` singleton skeleton (lock-on-idle / visibility-change wiring; not yet used for crypto).
    - Bundle SRI enabled in the Vite build (e.g., `vite-plugin-sri`).
    - `@simplewebauthn/browser` and `age-encryption` dependencies installed (not yet imported).
 6. CI: GitHub Actions workflows for `lint` (`golangci-lint`, `eslint`), `unit` (`go test`, `vitest`), `security-audit` (`govulncheck`, `npm audit`).
 7. Pre-commit hooks via `lefthook`: `gofmt` on Go side, `eslint` on TS side.
 
-**Exit:** `make dev` brings up Postgres + MailHog + Caddy; `go run ./cmd/api` responds to `/healthz`; the Vite dev server loads a placeholder page; CI green on the scaffold commits.
-
-**Deferred to M7 (or first external PR):** issue and PR templates, conventional-commit hook.
+**Exit:** `make dev` brings up Postgres + MailHog; `go run ./cmd/api` responds to `/healthz`; the Vite dev server loads a placeholder page; CI green on the scaffold commits.
 
 ## Milestone 1 - WebAuthn authentication
 
@@ -42,8 +32,8 @@ The full development scaffold: dev environment, Go backend skeleton, frontend Vi
 2. WebAuthn server library: `github.com/go-webauthn/webauthn`.
 3. PRF extension passthrough: server forwards PRF data unchanged; the browser computes PRF output during the ceremony and derives the age identity.
 4. Browser-side ceremonies via `@simplewebauthn/browser`. Login, register, logout flows wired end-to-end through the API. `CryptoSession` holds the derived age identity for the session.
-5. Rate limiting middleware on auth endpoints.
-6. Tests: handler-level (Go) for happy path and each documented error condition; component- and E2E-level (Vitest + Playwright) for the browser ceremonies with a fixture authenticator.
+5. Per-IP rate limit over `/api/*` (see [API Spec section 11](05-api-spec.md)).
+6. Security canary pinning the WebAuthn PRF salt.
 
 **Exit:** a user can register a passkey via browser, log in, and see a placeholder dashboard. No vault yet.
 
@@ -111,15 +101,18 @@ Run before starting M7:
 - [ ] `govulncheck` and `npm audit` clean.
 - [ ] All TODO/FIXME comments in security-relevant paths resolved or documented.
 
-## Milestone 7 - Deployment, docs
+## Milestone 7 - Hardening, deployment, docs
 
-1. Production Docker image build, distroless base, multi-stage build.
-2. Caddyfile for production (real domain, real cert, security headers).
-3. SMTP relay configuration for production email.
-4. Observability: pick a metrics tool, wire up the endpoint or exporter, document scraper setup for self-hosters.
-5. Issue and PR templates under `.github/`.
-6. Conventional-commit hook (lefthook commit-msg).
-7. Deployment guide walked end-to-end on a clean VM.
-8. Public-facing documentation polish.
+1. Production Docker image (distroless, multi-stage).
+2. Production Caddyfile; Caddy in the dev compose.
+3. Production compose file (`deploy/docker/compose.prod.yaml`).
+4. SMTP relay for production email.
+5. Observability: pick a metrics tool, wire up `/metrics`, document scraper setup.
+6. Test pass: Go handler tests, Vitest unit, Playwright E2E per [Testing Strategy](08-testing-strategy.md).
+7. CI gates: coverage thresholds, forbidden-pattern linter.
+8. Issue and PR templates under `.github/`.
+9. Conventional-commit hook (lefthook commit-msg).
+10. Deployment guide walked end-to-end on a clean VM.
+11. Public-facing documentation polish.
 
-**Exit:** clean-VM deployment in under 60 minutes per documented procedure. CI green across all gates.
+**Exit:** clean-VM deployment in under 60 minutes. CI green across all gates.
