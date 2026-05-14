@@ -4,8 +4,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
-
-const BASE = "/api/v1/auth";
+import { lockAndLogout } from "@/lib/session";
 
 type RegisterStartBody = {
   email: string;
@@ -33,6 +32,26 @@ type CredentialCreationResponse = {
 type CredentialRequestResponse = {
   publicKey: PublicKeyCredentialRequestOptionsJSON;
 };
+
+type Me = {
+  id: string;
+  email: string;
+  displayName: string;
+};
+
+const BASE = "/api/v1/auth";
+
+async function authFetch(
+  input: RequestInfo,
+  init?: RequestInit,
+): Promise<Response> {
+  const res = await fetch(input, { credentials: "include", ...init });
+  if (res.status === 401) {
+    await lockAndLogout("expired");
+    throw new Error("session expired");
+  }
+  return res;
+}
 
 export async function registerStart(
   body: RegisterStartBody,
@@ -95,22 +114,13 @@ export async function logout(): Promise<void> {
     method: "POST",
     credentials: "include",
   });
-  if (!res.ok) {
+  if (!res.ok && res.status !== 401) {
     throw new Error(`logout failed: ${res.status} ${await res.text()}`);
   }
 }
 
-export type Me = {
-  id: string;
-  email: string;
-  displayName: string;
-};
-
 export async function me(): Promise<Me> {
-  const res = await fetch(`${BASE}/me`, {
-    method: "GET",
-    credentials: "include",
-  });
+  const res = await authFetch(`${BASE}/me`, { method: "GET" });
   if (!res.ok) {
     throw new Error(`me failed: ${res.status}`);
   }

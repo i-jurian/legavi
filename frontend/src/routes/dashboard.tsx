@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { logout } from "@/api/auth";
-import { useCryptoSession } from "@/stores/cryptoSession";
+import { useCryptoSession } from "@/store/cryptoSession";
 import { Button } from "@/components/ui/button";
 import {
   Card,

@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -17,7 +18,7 @@ type Config struct {
 	JWTTTL        time.Duration
 	SMTPURL       string
 	FromEmail     string
-	LogLevel      string
+	LogLevel      slog.Level
 	APIListen     string
 	TestMode      bool
 }
@@ -29,7 +30,6 @@ func Load() (*Config, error) {
 		JWTSigningKey: os.Getenv("LGV_JWT_SIGNING_KEY"),
 		SMTPURL:       os.Getenv("LGV_SMTP_URL"),
 		FromEmail:     os.Getenv("LGV_FROM_EMAIL"),
-		LogLevel:      os.Getenv("LGV_LOG_LEVEL"),
 		APIListen:     os.Getenv("LGV_API_LISTEN"),
 	}
 
@@ -39,7 +39,6 @@ func Load() (*Config, error) {
 		"LGV_JWT_SIGNING_KEY": cfg.JWTSigningKey,
 		"LGV_SMTP_URL":        cfg.SMTPURL,
 		"LGV_FROM_EMAIL":      cfg.FromEmail,
-		"LGV_LOG_LEVEL":       cfg.LogLevel,
 		"LGV_API_LISTEN":      cfg.APIListen,
 	}
 	for name, value := range required {
@@ -67,6 +66,23 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("LGV_TEST_MODE: %w", err)
 	}
 	cfg.TestMode = testMode
+
+	logLevelStr := os.Getenv("LGV_LOG_LEVEL")
+	if logLevelStr == "" {
+		return nil, errors.New("LGV_LOG_LEVEL is required")
+	}
+	switch strings.ToLower(logLevelStr) {
+	case "debug":
+		cfg.LogLevel = slog.LevelDebug
+	case "info":
+		cfg.LogLevel = slog.LevelInfo
+	case "warn":
+		cfg.LogLevel = slog.LevelWarn
+	case "error":
+		cfg.LogLevel = slog.LevelError
+	default:
+		return nil, fmt.Errorf("LGV_LOG_LEVEL must be one of debug, info, warn, error; got %q", logLevelStr)
+	}
 
 	return cfg, nil
 }

@@ -1,9 +1,7 @@
 import { create } from "zustand";
 
-type SessionState = "LOCKED" | "UNLOCKING" | "UNLOCKED" | "LOCKING";
-
 type CryptoSession = {
-  state: SessionState;
+  state: "LOCKED" | "UNLOCKED";
   ageIdentity: Uint8Array | null;
   unlock: (identity: Uint8Array) => void;
   lock: () => void;

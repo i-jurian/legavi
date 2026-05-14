@@ -19,21 +19,21 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	slog.SetDefault(log)
-
-	if err := run(log); err != nil {
-		log.Error("fatal", "err", err)
+	if err := run(); err != nil {
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("fatal", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger) error {
+func run() error {
 	_ = godotenv.Load("../.env")
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
+
+	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	slog.SetDefault(log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
