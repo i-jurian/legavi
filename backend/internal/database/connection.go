@@ -1,18 +1,13 @@
-// Package pool wraps the application's Postgres connection pool and provides
-// goose-based migrations.
-package pool
+// Package database wraps the application's Postgres connection pool and migration runner.
+package database
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"io/fs"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib" // pgx as a database/sql driver, required for goose
-	"github.com/pressly/goose/v3"
 )
 
 type DB struct {
@@ -45,23 +40,4 @@ func (db *DB) Ping(ctx context.Context) error {
 		return errors.New("db pool is nil")
 	}
 	return db.Pool.Ping(ctx)
-}
-
-func (db *DB) Migrate(migrationsFS fs.FS) error {
-	if db == nil || db.dsn == "" {
-		return errors.New("db not initialized")
-	}
-	goose.SetBaseFS(migrationsFS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("goose set dialect: %w", err)
-	}
-	sqlDB, err := sql.Open("pgx", db.dsn)
-	if err != nil {
-		return fmt.Errorf("open sql db for migrations: %w", err)
-	}
-	defer func() { _ = sqlDB.Close() }()
-	if err := goose.Up(sqlDB, "."); err != nil {
-		return fmt.Errorf("goose up: %w", err)
-	}
-	return nil
 }

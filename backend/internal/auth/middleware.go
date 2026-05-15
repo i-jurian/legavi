@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+
+	"github.com/i-jurian/legavi/backend/internal/respond"
 )
 
 type ctxKey int
@@ -15,12 +17,12 @@ func (h *Handler) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(SessionCookieName)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			respond.Plain(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		userID, err := h.jwt.Parse(cookie.Value)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			respond.Plain(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, userID)

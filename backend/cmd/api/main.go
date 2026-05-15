@@ -11,7 +11,7 @@ import (
 
 	"github.com/i-jurian/legavi/backend/internal/auth"
 	"github.com/i-jurian/legavi/backend/internal/config"
-	"github.com/i-jurian/legavi/backend/internal/pool"
+	"github.com/i-jurian/legavi/backend/internal/database"
 	"github.com/i-jurian/legavi/backend/internal/server"
 	"github.com/i-jurian/legavi/backend/internal/store"
 	"github.com/i-jurian/legavi/backend/internal/vault"
@@ -39,14 +39,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	database, err := pool.Connect(ctx, cfg.DatabaseURL)
+	db, err := database.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
-	defer database.Close()
+	defer db.Close()
 
 	log.Info("running migrations")
-	if err := database.Migrate(migrations.FS); err != nil {
+	if err := db.Migrate(migrations.FS); err != nil {
 		return err
 	}
 
@@ -58,14 +58,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	st := store.NewStore(database.Pool)
-	cookies := auth.NewCookies(cfg.IsSecure(), cfg.JWTTTL)
+	st := store.From(db.Pool)
+	cookies := auth.NewCookies(cfg.IsSecure(), cfg.JWTTTL, "/api/v1/auth")
 	authH := auth.NewHandler(wa, jwt, st, cookies)
 	vaultH := vault.NewHandler(st)
 
 	log.Info("api starting", "public_url", cfg.PublicURL, "test_mode", cfg.TestMode)
 
-	srv := server.New(cfg, database, log, authH, vaultH)
+	srv := server.New(cfg, db, log, authH, vaultH)
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

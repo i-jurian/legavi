@@ -3,22 +3,26 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrNotFound = errors.New("not found")
 
 type Store struct {
 	*Queries
 	Pool *pgxpool.Pool
 }
 
-func NewStore(pool *pgxpool.Pool) *Store {
+func From(pool *pgxpool.Pool) *Store {
 	return &Store{Queries: New(pool), Pool: pool}
 }
 
@@ -133,10 +137,14 @@ func (s *Store) CreateVaultEntry(
 }
 
 func (s *Store) GetVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
-	return s.Queries.GetVaultEntry(ctx, GetVaultEntryParams{
+	entry, err := s.Queries.GetVaultEntry(ctx, GetVaultEntryParams{
 		ID:     pgtype.UUID{Bytes: id, Valid: true},
 		UserID: pgtype.UUID{Bytes: userID, Valid: true},
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
 }
 
 func (s *Store) ListUserVaultEntries(
@@ -158,25 +166,37 @@ func (s *Store) UpdateVaultEntry(
 	preview, bundle []byte,
 	sortOrder int32,
 ) (VaultEntry, error) {
-	return s.Queries.UpdateVaultEntry(ctx, UpdateVaultEntryParams{
+	entry, err := s.Queries.UpdateVaultEntry(ctx, UpdateVaultEntryParams{
 		ID:        pgtype.UUID{Bytes: id, Valid: true},
 		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
 		Preview:   preview,
 		Bundle:    bundle,
 		SortOrder: sortOrder,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
 }
 
 func (s *Store) SoftDeleteVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
-	return s.Queries.SoftDeleteVaultEntry(ctx, SoftDeleteVaultEntryParams{
+	entry, err := s.Queries.SoftDeleteVaultEntry(ctx, SoftDeleteVaultEntryParams{
 		ID:     pgtype.UUID{Bytes: id, Valid: true},
 		UserID: pgtype.UUID{Bytes: userID, Valid: true},
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
 }
 
 func (s *Store) RestoreVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
-	return s.Queries.RestoreVaultEntry(ctx, RestoreVaultEntryParams{
+	entry, err := s.Queries.RestoreVaultEntry(ctx, RestoreVaultEntryParams{
 		ID:     pgtype.UUID{Bytes: id, Valid: true},
 		UserID: pgtype.UUID{Bytes: userID, Valid: true},
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
 }

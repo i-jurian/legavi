@@ -15,13 +15,13 @@ import (
 
 	"github.com/i-jurian/legavi/backend/internal/auth"
 	"github.com/i-jurian/legavi/backend/internal/config"
-	"github.com/i-jurian/legavi/backend/internal/pool"
+	"github.com/i-jurian/legavi/backend/internal/database"
 	"github.com/i-jurian/legavi/backend/internal/vault"
 )
 
 type Server struct {
 	cfg     *config.Config
-	db      *pool.DB
+	db      *database.DB
 	log     *slog.Logger
 	auth    *auth.Handler
 	vault   *vault.Handler
@@ -29,7 +29,7 @@ type Server struct {
 	ipLimit *ipRateLimiter
 }
 
-func New(cfg *config.Config, database *pool.DB, log *slog.Logger, authH *auth.Handler, vaultH *vault.Handler) *Server {
+func New(cfg *config.Config, database *database.DB, log *slog.Logger, authH *auth.Handler, vaultH *vault.Handler) *Server {
 	s := &Server{
 		cfg:     cfg,
 		db:      database,
@@ -59,28 +59,8 @@ func (s *Server) apiRoutes() http.Handler {
 		r.Use(s.ipLimit.middleware)
 
 		r.Route("/v1", func(r chi.Router) {
-			r.Route("/auth", func(r chi.Router) {
-				r.Post("/register/start", s.auth.RegisterStart)
-				r.Post("/register/verify", s.auth.RegisterVerify)
-				r.Post("/login/start", s.auth.LoginStart)
-				r.Post("/login/verify", s.auth.LoginVerify)
-
-				r.Group(func(r chi.Router) {
-					r.Use(s.auth.RequireSession)
-					r.Post("/logout", s.auth.Logout)
-					r.Get("/me", s.auth.Me)
-				})
-			})
-
-			r.Route("/vault", func(r chi.Router) {
-				r.Use(s.auth.RequireSession)
-				r.Get("/entries", s.vault.List)
-				r.Post("/entries", s.vault.Create)
-				r.Get("/entries/{id}", s.vault.Get)
-				r.Put("/entries/{id}", s.vault.Update)
-				r.Delete("/entries/{id}", s.vault.SoftDelete)
-				r.Post("/entries/{id}/restore", s.vault.Restore)
-			})
+			r.Mount("/auth", s.auth.Routes())
+			r.Mount("/vault", s.vault.Routes(s.auth.RequireSession))
 		})
 	})
 

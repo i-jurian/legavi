@@ -15,7 +15,7 @@ CREATE TABLE release_state (
     state_entered_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     cooling_started_at  TIMESTAMPTZ,
     final_hold_until    TIMESTAMPTZ,
-    false_positive_flag BOOLEAN NOT NULL DEFAULT false
+    is_false_positive BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE release_offsets (

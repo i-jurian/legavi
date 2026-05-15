@@ -10,17 +10,17 @@ import (
 const (
 	SessionCookieName  = "lgv_session"
 	ceremonyCookieName = "lgv_webauthn_session"
-	ceremonyCookiePath = "/api/v1/auth"
 	ceremonyTTL        = 5 * time.Minute
 )
 
 type Cookies struct {
-	secure bool
-	jwtTTL time.Duration
+	secure       bool
+	jwtTTL       time.Duration
+	ceremonyPath string
 }
 
-func NewCookies(secure bool, jwtTTL time.Duration) *Cookies {
-	return &Cookies{secure: secure, jwtTTL: jwtTTL}
+func NewCookies(secure bool, jwtTTL time.Duration, ceremonyPath string) *Cookies {
+	return &Cookies{secure: secure, jwtTTL: jwtTTL, ceremonyPath: ceremonyPath}
 }
 
 func (c *Cookies) SetSession(w http.ResponseWriter, token string) {
@@ -48,7 +48,7 @@ func (c *Cookies) SetCeremony(w http.ResponseWriter, sessionID uuid.UUID) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     ceremonyCookieName,
 		Value:    sessionID.String(),
-		Path:     ceremonyCookiePath,
+		Path:     c.ceremonyPath,
 		HttpOnly: true,
 		Secure:   c.secure,
 		SameSite: http.SameSiteStrictMode,
@@ -60,7 +60,7 @@ func (c *Cookies) ClearCeremony(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:   ceremonyCookieName,
 		Value:  "",
-		Path:   ceremonyCookiePath,
+		Path:   c.ceremonyPath,
 		MaxAge: -1,
 	})
 }

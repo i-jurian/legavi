@@ -86,13 +86,13 @@ type ReleaseOffset struct {
 }
 
 type ReleaseState struct {
-	UserID            pgtype.UUID
-	State             string
-	LastCheckinAt     pgtype.Timestamptz
-	StateEnteredAt    pgtype.Timestamptz
-	CoolingStartedAt  pgtype.Timestamptz
-	FinalHoldUntil    pgtype.Timestamptz
-	FalsePositiveFlag bool
+	UserID           pgtype.UUID
+	State            string
+	LastCheckinAt    pgtype.Timestamptz
+	StateEnteredAt   pgtype.Timestamptz
+	CoolingStartedAt pgtype.Timestamptz
+	FinalHoldUntil   pgtype.Timestamptz
+	IsFalsePositive  bool
 }
 
 type User struct {
