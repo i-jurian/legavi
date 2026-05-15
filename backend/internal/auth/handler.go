@@ -334,6 +334,139 @@ func (h *Handler) LoginVerify(w http.ResponseWriter, r *http.Request) *respond.E
 	return nil
 }
 
+func (h *Handler) UnlockStart(w http.ResponseWriter, r *http.Request) *respond.Error {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		return respond.Unauthorized("unauthorized")
+	}
+
+	// Validate user exists
+	user, err := h.store.GetUser(r.Context(), userID)
+	if err != nil {
+		return respond.Unauthorized("user not found")
+	}
+
+	// Build credential allowlist for this user
+	creds, err := h.store.ListUserWebAuthnCredentials(r.Context(), user.ID.Bytes)
+	if err != nil {
+		return respond.Internal(fmt.Errorf("lookup credentials: %w", err))
+	}
+	if len(creds) == 0 {
+		return respond.Unauthorized("no credentials")
+	}
+
+	waUser := &webauthnUser{
+		id:          user.ID.Bytes[:],
+		email:       user.Email,
+		displayName: user.DisplayName,
+		credentials: creds,
+	}
+
+	// Begin unlock ceremony (PRF re-derivation only; no new session cookie issued)
+	options, sessionData, err := h.webauthn.BeginLogin(waUser, webauthn.WithAssertionExtensions(ageIdentityExtensions()))
+	if err != nil {
+		return respond.Internal(fmt.Errorf("begin login: %w", err))
+	}
+
+	// Persist challenge state for the verify step
+	sessionJSON, err := json.Marshal(sessionData)
+	if err != nil {
+		return respond.Internal(fmt.Errorf("marshal session: %w", err))
+	}
+	session, err := h.store.CreateSession(r.Context(), user.ID.Bytes, sessionJSON, "login", ceremonyTTL)
+	if err != nil {
+		return respond.Internal(fmt.Errorf("save session: %w", err))
+	}
+
+	// Bind ceremony to this browser via cookie
+	h.cookies.SetCeremony(w, uuid.UUID(session.ID.Bytes))
+
+	// Send challenge to the browser
+	respond.JSON(w, http.StatusOK, options)
+	return nil
+}
+
+func (h *Handler) UnlockVerify(w http.ResponseWriter, r *http.Request) *respond.Error {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		return respond.Unauthorized("unauthorized")
+	}
+
+	// Validate ceremony cookie
+	cookie, err := r.Cookie(ceremonyCookieName)
+	if err != nil {
+		return respond.Unauthorized("missing session cookie")
+	}
+	sessionID, err := uuid.Parse(cookie.Value)
+	if err != nil {
+		return respond.Unauthorized("invalid session cookie")
+	}
+
+	// Validate request payload
+	var req loginVerifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return respond.BadRequest("invalid json", err)
+	}
+
+	// Bind verify to its start ceremony (single-use)
+	session, err := h.store.ConsumeSession(r.Context(), sessionID, "login")
+	if err != nil {
+		return respond.Unauthorized("session expired or invalid")
+	}
+
+	// Ensure the ceremony session belongs to the authenticated user
+	if uuid.UUID(session.UserID.Bytes) != userID {
+		return respond.Unauthorized("session mismatch")
+	}
+
+	// Restore challenge state to verify
+	var sessionData webauthn.SessionData
+	if err := json.Unmarshal(session.SessionData, &sessionData); err != nil {
+		return respond.Internal(fmt.Errorf("corrupt session: %w", err))
+	}
+
+	// Validate user exists
+	user, err := h.store.GetUserByID(r.Context(), session.UserID)
+	if err != nil {
+		return respond.Unauthorized("user not found")
+	}
+
+	// Build credential allowlist for matching the assertion
+	creds, err := h.store.ListUserWebAuthnCredentials(r.Context(), user.ID.Bytes)
+	if err != nil {
+		return respond.Internal(fmt.Errorf("lookup credentials: %w", err))
+	}
+
+	waUser := &webauthnUser{
+		id:          user.ID.Bytes[:],
+		email:       user.Email,
+		displayName: user.DisplayName,
+		credentials: creds,
+	}
+
+	// Decode browser assertion
+	parsed, err := protocol.ParseCredentialRequestResponseBody(bytes.NewReader(req.Response))
+	if err != nil {
+		return respond.BadRequest("invalid assertion", err)
+	}
+
+	// Verify assertion against the original challenge
+	credential, err := h.webauthn.ValidateLogin(waUser, sessionData, parsed)
+	if err != nil {
+		return respond.Unauthorized("verification failed", err)
+	}
+
+	// Record credential usage (cloning detection + audit)
+	if err := h.store.UpdateCredentialUsage(r.Context(), credential.ID, credential.Authenticator.SignCount); err != nil {
+		return respond.Internal(fmt.Errorf("update credential: %w", err))
+	}
+
+	h.cookies.ClearCeremony(w)
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) *respond.Error {
 	h.cookies.ClearSession(w)
 	w.WriteHeader(http.StatusNoContent)

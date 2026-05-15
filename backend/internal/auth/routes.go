@@ -18,6 +18,8 @@ func (h *Handler) Routes() http.Handler {
 		r.Use(h.RequireSession)
 		r.Post("/logout", respond.Handle(h.Logout))
 		r.Get("/me", respond.Handle(h.Me))
+		r.Post("/unlock/start", respond.Handle(h.UnlockStart))
+		r.Post("/unlock/verify", respond.Handle(h.UnlockVerify))
 	})
 	return r
 }
