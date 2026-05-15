@@ -4,7 +4,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import { loginStart, loginVerify } from "@/api/auth";
 import { decodePRFInput, readPRFFirst } from "@/lib/prf";
 import { useCryptoSession } from "@/store/cryptoSession";
-import { LOCK_REASON_KEY, type LockReason } from "@/lib/session";
+import { consumeLockReason } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-const LOCK_MESSAGES: Record<LockReason, string> = {
+const LOCK_MESSAGES = {
   idle: "Signed out after 5 minutes of inactivity.",
   hidden: "Signed out after this tab was hidden.",
   expired: "Session expired. Sign in again.",
@@ -29,12 +29,9 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [lockMessage] = useState<string | null>(() => {
-    const reason = sessionStorage.getItem(LOCK_REASON_KEY) as LockReason | null;
-    if (!reason || !(reason in LOCK_MESSAGES)) return null;
-    sessionStorage.removeItem(LOCK_REASON_KEY);
-    return LOCK_MESSAGES[reason];
-  });
+  const [lockMessage] = useState<string | null>(() =>
+    consumeLockReason(LOCK_MESSAGES),
+  );
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,7 +51,7 @@ export function LoginPage() {
 
       await loginVerify({ response });
       useCryptoSession.getState().unlock(prfBytes);
-      await navigate({ to: "/dashboard" });
+      await navigate({ to: "/vault" });
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") {
         setError("Cancelled. Try again.");

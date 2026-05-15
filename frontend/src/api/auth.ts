@@ -4,7 +4,9 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
-import { lockAndLogout } from "@/lib/session";
+import { queryOptions } from "@tanstack/react-query";
+import { sessionFetch, lockAndLogout } from "@/lib/session";
+import { useCryptoSession } from "@/store/cryptoSession";
 
 type RegisterStartBody = {
   email: string;
@@ -33,25 +35,13 @@ type CredentialRequestResponse = {
   publicKey: PublicKeyCredentialRequestOptionsJSON;
 };
 
-type Me = {
+export type Me = {
   id: string;
   email: string;
   displayName: string;
 };
 
 const BASE = "/api/v1/auth";
-
-async function authFetch(
-  input: RequestInfo,
-  init?: RequestInit,
-): Promise<Response> {
-  const res = await fetch(input, { credentials: "include", ...init });
-  if (res.status === 401) {
-    await lockAndLogout("expired");
-    throw new Error("session expired");
-  }
-  return res;
-}
 
 export async function registerStart(
   body: RegisterStartBody,
@@ -109,6 +99,25 @@ export async function loginVerify(body: LoginVerifyBody): Promise<void> {
   }
 }
 
+export async function unlockStart(): Promise<CredentialRequestResponse> {
+  const res = await sessionFetch(`${BASE}/unlock/start`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`unlock/start failed: ${res.status} ${await res.text()}`);
+  }
+  return res.json();
+}
+
+export async function unlockVerify(body: LoginVerifyBody): Promise<void> {
+  const res = await sessionFetch(`${BASE}/unlock/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`unlock/verify failed: ${res.status} ${await res.text()}`);
+  }
+}
+
 export async function logout(): Promise<void> {
   const res = await fetch(`${BASE}/logout`, {
     method: "POST",
@@ -120,9 +129,24 @@ export async function logout(): Promise<void> {
 }
 
 export async function me(): Promise<Me> {
-  const res = await authFetch(`${BASE}/me`, { method: "GET" });
+  const res = await fetch(`${BASE}/me`, {
+    method: "GET",
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    if (useCryptoSession.getState().state === "UNLOCKED") {
+      await lockAndLogout("expired");
+    }
+    throw new Error("unauthorized");
+  }
   if (!res.ok) {
     throw new Error(`me failed: ${res.status}`);
   }
   return res.json();
 }
+
+export const meQuery = queryOptions({
+  queryKey: ["me"] as const,
+  queryFn: me,
+  staleTime: 5 * 60 * 1000,
+});

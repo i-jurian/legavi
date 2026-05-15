@@ -49,7 +49,7 @@ export function RegisterPage() {
         response,
       });
       useCryptoSession.getState().unlock(prfBytes);
-      await navigate({ to: "/dashboard" });
+      await navigate({ to: "/vault" });
     } catch (err) {
       if (err instanceof Error && err.name === "NotAllowedError") {
         setError("Cancelled. Try again.");
