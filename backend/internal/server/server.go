@@ -16,6 +16,7 @@ import (
 	"github.com/i-jurian/legavi/backend/internal/auth"
 	"github.com/i-jurian/legavi/backend/internal/config"
 	"github.com/i-jurian/legavi/backend/internal/pool"
+	"github.com/i-jurian/legavi/backend/internal/vault"
 )
 
 type Server struct {
@@ -23,16 +24,18 @@ type Server struct {
 	db      *pool.DB
 	log     *slog.Logger
 	auth    *auth.Handler
+	vault   *vault.Handler
 	apiSrv  *http.Server
 	ipLimit *ipRateLimiter
 }
 
-func New(cfg *config.Config, database *pool.DB, log *slog.Logger, authH *auth.Handler) *Server {
+func New(cfg *config.Config, database *pool.DB, log *slog.Logger, authH *auth.Handler, vaultH *vault.Handler) *Server {
 	s := &Server{
 		cfg:     cfg,
 		db:      database,
 		log:     log,
 		auth:    authH,
+		vault:   vaultH,
 		ipLimit: newIPRateLimiter(rate.Every(6*time.Second), 10), // burst 10 then refill 1 every 6s on all endpoints
 	}
 	s.apiSrv = &http.Server{
@@ -67,6 +70,16 @@ func (s *Server) apiRoutes() http.Handler {
 					r.Post("/logout", s.auth.Logout)
 					r.Get("/me", s.auth.Me)
 				})
+			})
+
+			r.Route("/vault", func(r chi.Router) {
+				r.Use(s.auth.RequireSession)
+				r.Get("/entries", s.vault.List)
+				r.Post("/entries", s.vault.Create)
+				r.Get("/entries/{id}", s.vault.Get)
+				r.Put("/entries/{id}", s.vault.Update)
+				r.Delete("/entries/{id}", s.vault.SoftDelete)
+				r.Post("/entries/{id}/restore", s.vault.Restore)
 			})
 		})
 	})

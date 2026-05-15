@@ -116,3 +116,67 @@ func (s *Store) UpdateCredentialUsage(ctx context.Context, credentialID []byte, 
 		SignCount: int64(signCount),
 	})
 }
+
+func (s *Store) CreateVaultEntry(
+	ctx context.Context,
+	userID uuid.UUID,
+	preview, bundle []byte,
+	sortOrder int32,
+) (VaultEntry, error) {
+	return s.Queries.CreateVaultEntry(ctx, CreateVaultEntryParams{
+		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+		Preview:   preview,
+		Bundle:    bundle,
+		SortOrder: sortOrder,
+	})
+}
+
+func (s *Store) GetVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
+	return s.Queries.GetVaultEntry(ctx, GetVaultEntryParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		UserID: pgtype.UUID{Bytes: userID, Valid: true},
+	})
+}
+
+func (s *Store) ListUserVaultEntries(
+	ctx context.Context,
+	userID uuid.UUID,
+	includeDeleted bool,
+	limit int32,
+) ([]ListUserVaultEntriesRow, error) {
+	return s.Queries.ListUserVaultEntries(ctx, ListUserVaultEntriesParams{
+		UserID:         pgtype.UUID{Bytes: userID, Valid: true},
+		IncludeDeleted: includeDeleted,
+		RowLimit:       limit,
+	})
+}
+
+func (s *Store) UpdateVaultEntry(
+	ctx context.Context,
+	id, userID uuid.UUID,
+	preview, bundle []byte,
+	sortOrder int32,
+) (VaultEntry, error) {
+	return s.Queries.UpdateVaultEntry(ctx, UpdateVaultEntryParams{
+		ID:        pgtype.UUID{Bytes: id, Valid: true},
+		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+		Preview:   preview,
+		Bundle:    bundle,
+		SortOrder: sortOrder,
+	})
+}
+
+func (s *Store) SoftDeleteVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
+	return s.Queries.SoftDeleteVaultEntry(ctx, SoftDeleteVaultEntryParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		UserID: pgtype.UUID{Bytes: userID, Valid: true},
+	})
+}
+
+func (s *Store) RestoreVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
+	return s.Queries.RestoreVaultEntry(ctx, RestoreVaultEntryParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		UserID: pgtype.UUID{Bytes: userID, Valid: true},
+	})
+}

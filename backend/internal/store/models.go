@@ -106,8 +106,8 @@ type User struct {
 type VaultEntry struct {
 	ID            pgtype.UUID
 	UserID        pgtype.UUID
-	Ciphertext    []byte
-	LabelHint     string
+	Preview       []byte
+	Bundle        []byte
 	SortOrder     int32
 	SchemaVersion int16
 	CreatedAt     pgtype.Timestamptz

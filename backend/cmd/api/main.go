@@ -14,6 +14,7 @@ import (
 	"github.com/i-jurian/legavi/backend/internal/pool"
 	"github.com/i-jurian/legavi/backend/internal/server"
 	"github.com/i-jurian/legavi/backend/internal/store"
+	"github.com/i-jurian/legavi/backend/internal/vault"
 	"github.com/i-jurian/legavi/backend/migrations"
 	"github.com/joho/godotenv"
 )
@@ -60,10 +61,11 @@ func run() error {
 	st := store.NewStore(database.Pool)
 	cookies := auth.NewCookies(cfg.IsSecure(), cfg.JWTTTL)
 	authH := auth.NewHandler(wa, jwt, st, cookies)
+	vaultH := vault.NewHandler(st)
 
 	log.Info("api starting", "public_url", cfg.PublicURL, "test_mode", cfg.TestMode)
 
-	srv := server.New(cfg, database, log, authH)
+	srv := server.New(cfg, database, log, authH, vaultH)
 	if err := srv.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
