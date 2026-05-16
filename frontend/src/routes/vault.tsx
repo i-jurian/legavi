@@ -16,6 +16,8 @@ import {
 } from "@/lib/vault-codec";
 import {
   useCreateEntry,
+  useDeleteEntry,
+  useRestoreEntry,
   useUpdateEntry,
   useVaultEntries,
 } from "@/hooks/useVault";
@@ -51,13 +53,23 @@ type EntryFormData = { label: string; files: File[] };
 
 const EMPTY_FORM: EntryFormData = { label: "", files: [] };
 
+const RESTORE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isRestorable(deletedAt: string | null): boolean {
+  if (!deletedAt) return false;
+  return Date.now() - new Date(deletedAt).getTime() < RESTORE_WINDOW_MS;
+}
+
 type Keys = { identity: string; recipient: string };
 
 export function VaultPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const session = useCryptoSession();
-  const { data, isPending, error } = useVaultEntries();
+  const [showDeleted, setShowDeleted] = useState(false);
+  const { data, isPending, error } = useVaultEntries({
+    includeDeleted: showDeleted,
+  });
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const { unlock, busy: unlockBusy, error: unlockError } = useUnlock();
@@ -109,6 +121,13 @@ export function VaultPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Vault</CardTitle>
           <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowDeleted((v) => !v)}
+            >
+              {showDeleted ? "Hide deleted" : "Show deleted"}
+            </Button>
             <CreateEntryButton keys={keys} />
             <Button
               size="sm"
@@ -166,6 +185,8 @@ function VaultRow({ entry, keys }: { entry: VaultEntrySummary; keys: Keys }) {
     enabled: editOpen,
   });
   const updateMut = useUpdateEntry();
+  const deleteMut = useDeleteEntry();
+  const restoreMut = useRestoreEntry();
 
   let label: string;
   if (previewQuery.isPending) label = "decrypting...";
@@ -183,30 +204,72 @@ function VaultRow({ entry, keys }: { entry: VaultEntrySummary; keys: Keys }) {
     });
   }
 
+  function handleDelete() {
+    if (!window.confirm(`Delete "${label}"? It can be restored within 30 days.`)) return;
+    deleteMut.mutate(entry.id);
+  }
+
+  const deleted = Boolean(entry.deletedAt);
+  const restorable = isRestorable(entry.deletedAt);
+  const actionError = deleteMut.error ?? restoreMut.error;
+
   return (
     <div className="flex items-center justify-between border-b py-2 last:border-b-0">
-      <div>
+      <div className="min-w-0">
         <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{entry.createdAt}</p>
+        <p className="text-xs text-muted-foreground">
+          {entry.createdAt}
+          {deleted && (
+            <span className="ml-2 text-destructive">
+              deleted {entry.deletedAt}
+              {!restorable && " (restore window expired)"}
+            </span>
+          )}
+        </p>
+        {actionError && (
+          <p className="mt-1 text-xs text-destructive">
+            {actionError.message}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-2">
-        {entry.deletedAt && (
-          <span className="text-xs text-destructive">deleted</span>
-        )}
-        <EntryFormDialog
-          trigger={
-            <Button size="sm" variant="outline">
-              Edit
+        {deleted ? (
+          restorable ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={restoreMut.isPending}
+              onClick={() => restoreMut.mutate(entry.id)}
+            >
+              {restoreMut.isPending ? "..." : "Restore"}
             </Button>
-          }
-          title="Edit entry"
-          submitLabel="Save"
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          initial={editQuery.data ?? null}
-          busy={updateMut.isPending}
-          onSubmit={handleUpdate}
-        />
+          ) : null
+        ) : (
+          <>
+            <EntryFormDialog
+              trigger={
+                <Button size="sm" variant="outline">
+                  Edit
+                </Button>
+              }
+              title="Edit entry"
+              submitLabel="Save"
+              open={editOpen}
+              onOpenChange={setEditOpen}
+              initial={editQuery.data ?? null}
+              busy={updateMut.isPending}
+              onSubmit={handleUpdate}
+            />
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={deleteMut.isPending}
+              onClick={handleDelete}
+            >
+              {deleteMut.isPending ? "..." : "Delete"}
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

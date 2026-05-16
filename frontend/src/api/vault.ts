@@ -143,3 +143,20 @@ export async function updateEntry(
   }
   return fromWireEntry(await res.json());
 }
+
+export async function deleteEntry(id: string): Promise<void> {
+  const res = await sessionFetch(`${BASE}/entries/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`deleteEntry failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+export async function restoreEntry(id: string): Promise<VaultEntry> {
+  const res = await sessionFetch(`${BASE}/entries/${id}/restore`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`restoreEntry failed: ${res.status} ${await res.text()}`);
+  }
+  return fromWireEntry(await res.json());
+}
