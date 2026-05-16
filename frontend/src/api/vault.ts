@@ -120,3 +120,26 @@ export async function createEntry(body: EntryWrite): Promise<VaultEntry> {
   }
   return fromWireEntry(await res.json());
 }
+
+export async function getEntry(id: string): Promise<VaultEntry> {
+  const res = await sessionFetch(`${BASE}/entries/${id}`, { method: "GET" });
+  if (!res.ok) {
+    throw new Error(`getEntry failed: ${res.status} ${await res.text()}`);
+  }
+  return fromWireEntry(await res.json());
+}
+
+export async function updateEntry(
+  id: string,
+  body: EntryWrite,
+): Promise<VaultEntry> {
+  const res = await sessionFetch(`${BASE}/entries/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(toWireEntryWrite(body)),
+  });
+  if (!res.ok) {
+    throw new Error(`updateEntry failed: ${res.status} ${await res.text()}`);
+  }
+  return fromWireEntry(await res.json());
+}

@@ -1,7 +1,9 @@
 import { Decrypter, Encrypter } from "age-encryption";
 import {
   BlobReader,
+  BlobWriter,
   Uint8ArrayWriter,
+  ZipReader,
   ZipWriter,
 } from "@zip.js/zip.js";
 
@@ -55,6 +57,23 @@ export async function decryptPreview(
   return parsed;
 }
 
+export async function decryptBundle(
+  bundle: Uint8Array,
+  identity: string
+): Promise<File[]> {
+  const zipBytes = await decryptBytes(bundle, identity);
+  const reader = new ZipReader(new BlobReader(new Blob([new Uint8Array(zipBytes)])));
+  const entries = await reader.getEntries();
+  const files: File[] = [];
+  for (const entry of entries) {
+    if (entry.directory || !entry.getData) continue;
+    const blob = await entry.getData(new BlobWriter());
+    files.push(new File([blob], entry.filename));
+  }
+  await reader.close();
+  return files;
+}
+
 function isPreview(v: unknown): v is Preview {
   if (typeof v !== "object" || v === null) return false;
   const obj = v as Record<string, unknown>;
@@ -79,6 +98,15 @@ async function decryptText(
   const dec = new Decrypter();
   dec.addIdentity(identity);
   return dec.decrypt(ciphertext, "text");
+}
+
+async function decryptBytes(
+  ciphertext: Uint8Array,
+  identity: string
+): Promise<Uint8Array> {
+  const dec = new Decrypter();
+  dec.addIdentity(identity);
+  return dec.decrypt(ciphertext, "uint8array");
 }
 
 async function zipFiles(files: File[]): Promise<Uint8Array> {

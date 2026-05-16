@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createEntry,
   listEntries,
+  updateEntry,
   type EntryWrite,
   type ListEntriesOptions,
 } from "@/api/vault";
@@ -19,6 +20,17 @@ export function useCreateEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: EntryWrite) => createEntry(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: entriesKey });
+    },
+  });
+}
+
+export function useUpdateEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: EntryWrite }) =>
+      updateEntry(id, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: entriesKey });
     },
