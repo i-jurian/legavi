@@ -152,6 +152,29 @@ Authenticated. Used by the frontend route guard.
 
 **Errors:** `401` if the cookie is missing/expired or the user no longer exists.
 
+### 2.7 `POST /api/v1/auth/unlock/start`
+
+Authenticated. Begins a WebAuthn assertion for the current user without re-typing email, so the browser can re-derive the PRF output.
+
+**Request:** empty body.
+
+**Response 200:** same shape as `login/start`. Also sets the ceremony cookie.
+
+**Errors:** `401` if the session is missing, the user is not found, or no credentials exist.
+
+### 2.8 `POST /api/v1/auth/unlock/verify`
+
+Authenticated. Verifies the assertion, clears the ceremony cookie. Session cookie is not re-issued.
+
+**Request:** same shape as `login/verify`.
+
+**Response 204:** no body.
+
+**Errors:**
+
+- `400` malformed JSON or assertion.
+- `401` missing ceremony cookie, session mismatch with the ceremony, or assertion verification failure.
+
 ## 3. Check-in endpoint
 
 ### 3.1 `POST /api/v1/checkin`
@@ -176,17 +199,16 @@ Also implicit on every authenticated request via middleware.
 
 ## 4. Vault entries endpoints
 
-All endpoints under `/api/v1/vault/*` require authentication.
+All endpoints under `/api/v1/vault/*` require authentication. See [Data Model section 4.4](04-data-model.md#44-vault_entries) for the `preview` / `bundle` storage shape.
 
 ### 4.1 `GET /api/v1/vault/entries`
 
-List the user's entries. Returns ciphertext + metadata; the browser decrypts on demand.
+List the user's entries. Returns `preview` blobs only.
 
 **Query params:**
 
 - `limit`: integer, default 100, max 500.
-- `cursor`: opaque pagination cursor.
-- `include_deleted`: boolean, default false.
+- `includeDeleted`: boolean, default false.
 
 **Response 200:**
 
@@ -195,25 +217,19 @@ List the user's entries. Returns ciphertext + metadata; the browser decrypts on 
   "entries": [
     {
       "id": "uuid-...",
-      "label_hint": "Bank credentials",
-      "sort_order": 1,
-      "ciphertext": "base64-... (age-encrypted zip bundle)",
-      "schema_version": 1,
-      "recipients": [
-        {
-          "contact_id": "uuid-...",
-          "display_name": "Alice",
-          "age_recipient": "age1..."
-        }
-      ],
-      "created_at": "2026-05-09T...",
-      "updated_at": "2026-05-09T...",
-      "deleted_at": null
+      "preview": "base64-... (age-encrypted preview)",
+      "sortOrder": 1,
+      "schemaVersion": 1,
+      "createdAt": "2026-05-09T12:34:56Z",
+      "updatedAt": "2026-05-09T12:34:56Z",
+      "deletedAt": null
     }
   ],
-  "next_cursor": null
+  "nextCursor": null
 }
 ```
+
+`nextCursor` is always `null`.
 
 ### 4.2 `POST /api/v1/vault/entries`
 
@@ -223,34 +239,68 @@ Create a new entry.
 
 ```json
 {
-  "label_hint": "Bank credentials",
-  "ciphertext": "base64-...",
-  "sort_order": 1,
-  "recipient_contact_ids": ["uuid-..."]
+  "preview": "base64-...",
+  "bundle": "base64-...",
+  "sortOrder": 1,
+  "recipientContactIds": []
 }
 ```
 
-Server validates `recipient_contact_ids` against the user's verified contacts. Empty list creates an owner-only entry that never enters the release flow.
+Empty `recipientContactIds` creates an owner-only entry. Non-empty list returns `400`.
 
-**Response 201:** the created entry record.
+**Response 201:** the created entry record including `bundle`.
 
-### 4.3 `PUT /api/v1/vault/entries/{id}`
+### 4.3 `GET /api/v1/vault/entries/{id}`
 
-Update an existing entry. Same shape as create.
+Fetch one entry including `bundle`.
 
-If `recipient_contact_ids` changes, the browser MUST submit fresh ciphertext encrypted to the new set. The server checks the request list matches the age header (consistency only; cryptographic enforcement is age's own).
+**Response 200:**
 
-### 4.4 `DELETE /api/v1/vault/entries/{id}`
+```json
+{
+  "id": "uuid-...",
+  "preview": "base64-...",
+  "bundle": "base64-...",
+  "sortOrder": 1,
+  "schemaVersion": 1,
+  "createdAt": "2026-05-09T12:34:56Z",
+  "updatedAt": "2026-05-09T12:34:56Z",
+  "deletedAt": null
+}
+```
 
-Soft-delete an entry. Restorable within 30 days.
+**Errors:** `404` if the entry does not exist or does not belong to the caller.
 
-### 4.5 `POST /api/v1/vault/entries/{id}/restore`
+### 4.4 `PUT /api/v1/vault/entries/{id}`
 
-Restore a soft-deleted entry within the 30-day window.
+Update an existing entry. Same request shape as create. Returns the updated record including `bundle`.
 
-### 4.6 `POST /api/v1/vault/entries/bulk-reassign`
+### 4.5 `DELETE /api/v1/vault/entries/{id}`
 
-Bulk reassign recipients across multiple entries. Browser submits a list of `(entry_id, new_ciphertext, new_recipient_contact_ids)` tuples. Server applies in a single transaction.
+Soft-delete. Restorable within 30 days.
+
+### 4.6 `POST /api/v1/vault/entries/{id}/restore`
+
+Restore a soft-deleted entry. Returns the restored record. `404` if not found, not deleted, or past the 30-day window.
+
+### 4.7 `POST /api/v1/vault/entries/reorder`
+
+Bulk update of `sortOrder` for active entries.
+
+**Request:**
+
+```json
+{
+  "orders": [
+    { "id": "uuid-...", "sortOrder": 100 },
+    { "id": "uuid-...", "sortOrder": 200 }
+  ]
+}
+```
+
+**Response 204:** no body.
+
+**Errors:** `400` if `orders` is empty or any id is malformed.
 
 ## 5. Contacts endpoints
 

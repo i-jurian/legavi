@@ -100,14 +100,14 @@ CREATE INDEX webauthn_sessions_expires_idx ON webauthn_sessions(expires_at);
 
 ### 4.4 `vault_entries`
 
-Encrypted vault entries.
+Encrypted vault entries, stored as two blobs per entry.
 
 ```sql
 CREATE TABLE vault_entries (
     id              UUID PRIMARY KEY,
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    ciphertext      BYTEA NOT NULL,                    -- age-encrypted zip bundle of one or more files
-    label_hint      TEXT NOT NULL,                     -- short non-secret label (server uses for sort/filter)
+    preview         BYTEA NOT NULL,                    -- age-encrypted {label, schemaVersion}, returned by list
+    bundle          BYTEA NOT NULL,                    -- age-encrypted zip bundle of one or more files, fetched on open
     sort_order      INTEGER NOT NULL DEFAULT 0,
     schema_version  SMALLINT NOT NULL DEFAULT 1,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -119,7 +119,7 @@ CREATE INDEX vault_entries_user_active_idx ON vault_entries(user_id, sort_order)
   WHERE deleted_at IS NULL;
 ```
 
-`schema_version` allows wire-format upgrades.
+The label is encrypted inside `preview`. `schema_version` allows wire-format upgrades.
 
 ### 4.5 `contacts`
 
@@ -167,7 +167,7 @@ CREATE TABLE entry_recipients (
 CREATE INDEX entry_recipients_contact_idx ON entry_recipients(contact_id);
 ```
 
-Reassignment is implemented by deleting old rows and inserting new ones in a transaction. The corresponding `vault_entries.ciphertext` is updated in the same transaction with the freshly-encrypted blob.
+Reassignment is implemented by deleting old rows and inserting new ones in a transaction. The corresponding `vault_entries.preview` and `vault_entries.bundle` are updated in the same transaction with the freshly-encrypted blobs.
 
 ### 4.7 `release_state`
 
@@ -189,7 +189,7 @@ CREATE TABLE release_state (
     state_entered_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     cooling_started_at  TIMESTAMPTZ,
     final_hold_until    TIMESTAMPTZ,
-    false_positive_flag BOOLEAN NOT NULL DEFAULT false
+    is_false_positive   BOOLEAN NOT NULL DEFAULT false
 );
 ```
 
@@ -283,4 +283,4 @@ Workers claim jobs with `UPDATE ... WHERE status = 'pending' AND run_after <= no
 ## 5. Retention
 
 - Vault data retained until the user explicitly deletes their account. Audit log retained for the user's lifetime; not pruned unless requested.
-- Soft-deleted entries retained for 30 days, hard-deleted by a periodic job thereafter.
+- Soft-deleted entries restorable for 30 days, hard-purged thereafter by a periodic job.

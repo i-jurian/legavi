@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/i-jurian/legavi/backend/internal/respond"
 )
 
 const rateLimitIdleTTL = time.Hour
@@ -75,7 +77,7 @@ func (l *ipRateLimiter) middleware(next http.Handler) http.Handler {
 		ip := clientIP(r)
 		if !l.allow(ip) {
 			slog.Info("rate limit hit", "ip", ip)
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			respond.Plain(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
 		next.ServeHTTP(w, r)

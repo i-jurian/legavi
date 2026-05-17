@@ -5,10 +5,11 @@ import {
   Outlet,
   redirect,
 } from "@tanstack/react-router";
-import { me } from "@/api/auth";
-import { DashboardPage } from "./routes/dashboard";
+import { meQuery } from "@/api/auth";
+import { queryClient } from "@/lib/queryClient";
 import { LoginPage } from "./routes/login";
 import { RegisterPage } from "./routes/register";
+import { VaultPage } from "./routes/vault";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -32,24 +33,24 @@ const loginRoute = createRoute({
   component: LoginPage,
 });
 
-const dashboardRoute = createRoute({
+const vaultRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/dashboard",
+  path: "/vault",
   beforeLoad: async () => {
     try {
-      await me();
+      await queryClient.fetchQuery(meQuery);
     } catch {
       throw redirect({ to: "/login" });
     }
   },
-  component: DashboardPage,
+  component: VaultPage,
 });
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   registerRoute,
   loginRoute,
-  dashboardRoute,
+  vaultRoute,
 ]);
 
 export const router = createRouter({ routeTree });

@@ -3,8 +3,8 @@
 CREATE TABLE vault_entries (
     id             UUID PRIMARY KEY,
     user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    ciphertext     BYTEA NOT NULL,
-    label_hint     TEXT NOT NULL,
+    preview        BYTEA NOT NULL,
+    bundle         BYTEA NOT NULL,
     sort_order     INTEGER NOT NULL DEFAULT 0,
     schema_version SMALLINT NOT NULL DEFAULT 1,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),

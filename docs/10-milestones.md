@@ -35,15 +35,14 @@ Each milestone has a narrow objective and a clear exit criterion.
 5. Per-IP rate limit over `/api/*` (see [API Spec section 11](05-api-spec.md)).
 6. Security canary pinning the WebAuthn PRF salt.
 
-**Exit:** a user can register a passkey via browser, log in, and see a placeholder dashboard. No vault yet.
+**Exit:** a user can register a passkey via browser, log in, and reach an authenticated landing page. No vault yet.
 
 ## Milestone 2 - Vault entries
 
-1. `vault_entries` CRUD endpoints per [API Spec section 4](05-api-spec.md). Server stores opaque ciphertext + metadata only.
+1. `vault_entries` CRUD endpoints per [API Spec section 4](05-api-spec.md). Server stores two opaque blobs per entry (`preview`, `bundle`) plus metadata.
 2. Frontend vault UI: list, create, edit (add/remove files), delete, restore (within soft-delete window).
 3. Browser-side zip via `@zip.js/zip.js`; entry payload is a zip bundle of one or more files.
 4. Encryption/decryption via the `age-encryption` npm package, scoped to the owner's age identity from the `CryptoSession`.
-5. `label_hint` and `sort_order` UI.
 
 **Exit:** a single user can store and retrieve encrypted vault entries via the browser.
 

@@ -3,22 +3,26 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrNotFound = errors.New("not found")
 
 type Store struct {
 	*Queries
 	Pool *pgxpool.Pool
 }
 
-func NewStore(pool *pgxpool.Pool) *Store {
+func From(pool *pgxpool.Pool) *Store {
 	return &Store{Queries: New(pool), Pool: pool}
 }
 
@@ -115,4 +119,109 @@ func (s *Store) UpdateCredentialUsage(ctx context.Context, credentialID []byte, 
 		ID:        credentialID,
 		SignCount: int64(signCount),
 	})
+}
+
+func (s *Store) CreateVaultEntry(
+	ctx context.Context,
+	userID uuid.UUID,
+	preview, bundle []byte,
+	sortOrder int32,
+) (VaultEntry, error) {
+	return s.Queries.CreateVaultEntry(ctx, CreateVaultEntryParams{
+		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+		Preview:   preview,
+		Bundle:    bundle,
+		SortOrder: sortOrder,
+	})
+}
+
+func (s *Store) GetVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
+	entry, err := s.Queries.GetVaultEntry(ctx, GetVaultEntryParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		UserID: pgtype.UUID{Bytes: userID, Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
+}
+
+func (s *Store) ListUserVaultEntries(
+	ctx context.Context,
+	userID uuid.UUID,
+	includeDeleted bool,
+	limit int32,
+) ([]ListUserVaultEntriesRow, error) {
+	return s.Queries.ListUserVaultEntries(ctx, ListUserVaultEntriesParams{
+		UserID:         pgtype.UUID{Bytes: userID, Valid: true},
+		IncludeDeleted: includeDeleted,
+		RowLimit:       limit,
+	})
+}
+
+func (s *Store) UpdateVaultEntry(
+	ctx context.Context,
+	id, userID uuid.UUID,
+	preview, bundle []byte,
+	sortOrder int32,
+) (VaultEntry, error) {
+	entry, err := s.Queries.UpdateVaultEntry(ctx, UpdateVaultEntryParams{
+		ID:        pgtype.UUID{Bytes: id, Valid: true},
+		UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+		Preview:   preview,
+		Bundle:    bundle,
+		SortOrder: sortOrder,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
+}
+
+func (s *Store) SoftDeleteVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
+	entry, err := s.Queries.SoftDeleteVaultEntry(ctx, SoftDeleteVaultEntryParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		UserID: pgtype.UUID{Bytes: userID, Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
+}
+
+func (s *Store) RestoreVaultEntry(ctx context.Context, id, userID uuid.UUID) (VaultEntry, error) {
+	entry, err := s.Queries.RestoreVaultEntry(ctx, RestoreVaultEntryParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		UserID: pgtype.UUID{Bytes: userID, Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return entry, ErrNotFound
+	}
+	return entry, err
+}
+
+type EntryOrder struct {
+	ID        uuid.UUID
+	SortOrder int32
+}
+
+func (s *Store) ReorderVaultEntries(ctx context.Context, userID uuid.UUID, orders []EntryOrder) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := s.WithTx(tx)
+	for _, o := range orders {
+		if err := q.UpdateVaultEntrySortOrder(ctx, UpdateVaultEntrySortOrderParams{
+			ID:        pgtype.UUID{Bytes: o.ID, Valid: true},
+			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+			SortOrder: o.SortOrder,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }

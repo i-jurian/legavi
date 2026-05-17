@@ -14,7 +14,7 @@ The WebAuthn PRF extension derives a stable encryption identity from each user's
 
 ## 1. Trust premises
 
-- The owner trusts their own device's hardware-backed keystore (Secure Enclave on Apple, TPM on Windows, FIDO2 on hardware keys).
+- The owner trusts the storage backing whichever unlock paths they configure.
 - The operator is treated as zero-knowledge for owner data: ciphertext only, no plaintext access.
 - Each contact independently trusts their own device's hardware-backed keystore.
 - Network is adversarial; TLS 1.3 protects in transit but confidentiality guarantees hold at the application layer regardless.
@@ -64,7 +64,7 @@ ciphertext = age_encrypt(
 )
 ```
 
-The server stores the ciphertext along with metadata (entry ID, label hint, sort order, recipient assignment list).
+The server stores each entry as two age-encrypted blobs (`preview`, `bundle`) plus non-content metadata (entry ID, sort order, timestamps, recipient assignment list).
 
 Properties:
 
@@ -90,12 +90,12 @@ The owner can change recipient assignments at any time while alive. Re-assignmen
 
 When the owner changes an entry's recipient list:
 
-1. Browser fetches the current ciphertext, decrypts with the owner's identity.
-2. Browser re-encrypts to the new recipient set.
-3. New ciphertext replaces the old on the server.
+1. Browser fetches the current `preview` and `bundle`, decrypts both with the owner's identity.
+2. Browser re-encrypts both to the new recipient set.
+3. The new blobs replace the old on the server.
 4. Audit log records the reassignment event with the entry ID and the (hashed) recipient list.
 
-Because the previous ciphertext may have been observed by the previously-assigned recipient, reassignment cannot retroactively rescind access to data that was already disclosed.
+Because the previous blobs may have been observed by the previously-assigned recipient, reassignment cannot retroactively rescind access to data that was already disclosed.
 
 ## 5. Audit log
 
