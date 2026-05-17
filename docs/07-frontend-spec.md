@@ -13,16 +13,16 @@
 - **`@scure/base`** for bech32 encoding of age keys.
 - **`age-encryption`** (npm) for age encryption/decryption.
 - **`@zip.js/zip.js`** for browser-side zip/unzip of vault bundles.
+- **`@dnd-kit/core`** and **`@dnd-kit/sortable`** for drag-and-drop reordering.
 
 ## 2. Routes
 
 | Path                 | Auth required? | Purpose                                                   |
 | -------------------- | -------------- | --------------------------------------------------------- |
-| `/`                  | No             | Marketing page (or redirect to `/dashboard` if logged in) |
+| `/`                  | No             | Marketing page (or redirect to `/vault` if logged in)     |
 | `/register`          | No             | Passkey registration ceremony                             |
 | `/login`             | No             | Passkey authentication ceremony                           |
-| `/dashboard`         | Yes            | Vault overview, recent activity                           |
-| `/vault`             | Yes            | Vault entry list                                          |
+| `/vault`             | Yes            | Vault entry list and post-login landing                   |
 | `/vault/new`         | Yes            | Create entry                                              |
 | `/vault/:id`         | Yes            | View / edit entry                                         |
 | `/contacts`          | Yes            | Contact list and management                               |
@@ -47,20 +47,24 @@ Zustand store holding the **32-byte PRF output**. The age keypair is derived on 
 
 ### 4.1 Lifecycle states
 
-| State      | Description                                                | Identity in memory? |
-| ---------- | ---------------------------------------------------------- | ------------------- |
-| `LOCKED`   | No active session, no identity.                            | No                  |
-| `UNLOCKED` | Active session, identity available for decrypt operations. | Yes                 |
+| State      | Description                                                            | Identity in memory? |
+| ---------- | ---------------------------------------------------------------------- | ------------------- |
+| `LOCKED`   | No identity in memory. Session cookie may still be valid (page refresh, new tab) or already cleared. | No |
+| `UNLOCKED` | Identity available for decrypt operations.                             | Yes                 |
 
 ### 4.2 Lock triggers
 
 All four triggers run the same flow in [lib/session.ts](../frontend/src/lib/session.ts) `lockAndLogout(reason)`: zero PRF bytes, call `POST /api/v1/auth/logout`, redirect to `/login` with a reason-tagged message.
 
-- **Explicit logout:** Sign out on `/dashboard`. No reason message on `/login`.
+- **Explicit logout:** Sign out on `/vault`. No reason message on `/login`.
 - **Idle (5 min) and visibility change (60 s):** [hooks/useSessionTimeout.ts](../frontend/src/hooks/useSessionTimeout.ts) mounted in `App.tsx`. Reason `idle` or `hidden`.
-- **Server-signaled expiry:** any authenticated API call returning 401 triggers the same flow via the `authFetch` wrapper in [api/auth.ts](../frontend/src/api/auth.ts). Reason `expired`.
+- **Server-signaled expiry:** any authenticated API call returning 401 triggers the same flow via the `sessionFetch` wrapper in [lib/session.ts](../frontend/src/lib/session.ts). Reason `expired`.
 
 PRF bytes are zeroed via `Uint8Array.fill(0)` (best-effort; JS offers no stronger guarantee).
+
+### 4.3 In-place unlock
+
+When the session cookie is still valid but the identity is missing (after a page refresh or fresh tab), the user is shown an unlock prompt instead of being sent to `/login`. The `useUnlock` hook in [lib/session.ts](../frontend/src/lib/session.ts) runs a WebAuthn assertion against `POST /api/v1/auth/unlock/start` and `/verify`, re-derives the PRF output, and puts the identity back in `CryptoSession`. No re-typing of email; no new session cookie is issued.
 
 ## 5. WebAuthn ceremonies
 
@@ -97,9 +101,10 @@ Same shape with `startAuthentication` and `loginStart`/`loginVerify`. PRF output
 
 ### 6.1 Entry list
 
-Sortable, filterable by assignment and label. Each row shows:
+Reorderable by drag-and-drop, filterable by assignment and label. Each row shows:
 
-- Label hint
+- Drag handle (active entries only)
+- Label (decrypted from `preview`)
 - File count
 - Assigned to (avatars or names of designated contacts; empty / "-" if owner-only)
 - Last updated timestamp
@@ -107,17 +112,17 @@ Sortable, filterable by assignment and label. Each row shows:
 
 "Assigned to" lists only designated contacts; the owner is always a recipient but not shown.
 
-Decryption happens lazily: rows display ciphertext metadata until the user clicks to open; clicking decrypts and unzips in memory and shows the bundle's file list.
+The list endpoint returns `preview` only. The full `bundle` is fetched when the user opens an entry, then decrypted and unzipped in memory.
 
 ### 6.2 Create / edit entry
 
-Form: label hint (server-visible), files (drag-drop or picker; 25 MB cap per bundle), assigned-to (multi-select from verified contacts; empty = owner-only).
+Form: label, files (drag-drop or picker; 25 MB cap per bundle), assigned-to (multi-select from verified contacts; empty = owner-only).
 
-**Submit:** derive recipient set, zip files via `@zip.js/zip.js`, age-encrypt, POST ciphertext + label + recipient IDs.
+**Submit:** age-encrypt the label into `preview`, zip the files via `@zip.js/zip.js` and age-encrypt into `bundle`, POST both with `sortOrder` and `recipientContactIds`.
 
-**View:** decrypt, unzip, render file list. Inline preview for images/PDFs/text/video/audio via page-scoped blob URLs (revoked on close); other types are download-only.
+**View:** fetch by ID, decrypt `bundle`, unzip, render file list. Inline preview for images/PDFs/text/video/audio via page-scoped blob URLs (revoked on close); other types are download-only.
 
-**Edit:** fetch, decrypt, modify, re-encrypt to the current recipient set, upload.
+**Edit:** fetch, decrypt both blobs, modify, re-encrypt, upload.
 
 ### 6.3 Reassign
 

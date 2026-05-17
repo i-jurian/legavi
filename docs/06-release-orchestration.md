@@ -50,7 +50,7 @@ Transitions follow a pure function `nextState(current, releaseState, offsets, no
 | `REMINDED_FIRM` | `REMINDED_FINAL`| `now - last_checkin_at >= final_after_days`            | Worker emails owner (final reminder)                                       |
 | `REMINDED_FINAL`| `COOLING`       | Final reminder sent                                    | Set `cooling_started_at = now`; worker emails recipients (cooling period)  |
 | `COOLING`       | `FINAL_HOLD`    | `now - cooling_started_at >= cooling_hours` (48h)      | Set `final_hold_until = now + final_hold_hours`; worker emails owner       |
-| `FINAL_HOLD`    | `RELEASED`      | `now >= final_hold_until AND false_positive_flag = false` | Worker emails each assigned contact a recovery link                     |
+| `FINAL_HOLD`    | `RELEASED`      | `now >= final_hold_until AND is_false_positive = false`   | Worker emails each assigned contact a recovery link                     |
 
 ### 3.2 Any state -> `ACTIVE` (check-in)
 

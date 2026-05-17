@@ -64,7 +64,7 @@ Drive the scheduler with a fake clock through the full `ACTIVE` -> `RELEASED` pa
 ### 3.3 Property tests
 
 - **Idempotency:** calling `Tick()` repeatedly without time advance produces no state changes after the first.
-- **Monotonicity:** state never moves backward except via `checkin` or `false_positive_flag` (the latter only during the 24-hour final hold).
+- **Monotonicity:** state never moves backward except via `checkin` or `is_false_positive` (the latter only during the 24-hour final hold).
 - **No release before final offset elapses, ever.**
 - **After `final_hold_until` has elapsed in the RELEASED state, no transition back to ACTIVE is possible.**
 - **Precondition gating:** an owner with zero contact-assigned entries stays in `ACTIVE` regardless of `last_checkin_at` age; making one contact assignment engages the state machine; removing the last contact assignment disengages it.
