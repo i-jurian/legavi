@@ -13,6 +13,7 @@ func (h *Handler) Routes(requireSession func(http.Handler) http.Handler) http.Ha
 	r.Use(requireSession)
 	r.Get("/entries", respond.Handle(h.List))
 	r.Post("/entries", respond.Handle(h.Create))
+	r.Post("/entries/reorder", respond.Handle(h.Reorder))
 	r.Get("/entries/{id}", respond.Handle(h.Get))
 	r.Put("/entries/{id}", respond.Handle(h.Update))
 	r.Delete("/entries/{id}", respond.Handle(h.SoftDelete))

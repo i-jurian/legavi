@@ -200,3 +200,28 @@ func (s *Store) RestoreVaultEntry(ctx context.Context, id, userID uuid.UUID) (Va
 	}
 	return entry, err
 }
+
+type EntryOrder struct {
+	ID        uuid.UUID
+	SortOrder int32
+}
+
+func (s *Store) ReorderVaultEntries(ctx context.Context, userID uuid.UUID, orders []EntryOrder) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := s.WithTx(tx)
+	for _, o := range orders {
+		if err := q.UpdateVaultEntrySortOrder(ctx, UpdateVaultEntrySortOrderParams{
+			ID:        pgtype.UUID{Bytes: o.ID, Valid: true},
+			UserID:    pgtype.UUID{Bytes: userID, Valid: true},
+			SortOrder: o.SortOrder,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}

@@ -46,3 +46,8 @@ WHERE id = $1
   AND deleted_at IS NOT NULL
   AND deleted_at > now() - INTERVAL '30 days'
 RETURNING *;
+
+-- name: UpdateVaultEntrySortOrder :exec
+UPDATE vault_entries
+SET sort_order = $3
+WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL;

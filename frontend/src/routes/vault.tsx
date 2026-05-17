@@ -6,6 +6,24 @@ import {
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { logout } from "@/api/auth";
 import { useCryptoSession } from "@/store/cryptoSession";
 import { deriveAgeKeypair } from "@/lib/age-keypair";
@@ -17,6 +35,7 @@ import {
 import {
   useCreateEntry,
   useDeleteEntry,
+  useReorderEntries,
   useRestoreEntry,
   useUpdateEntry,
   useVaultEntries,
@@ -49,6 +68,8 @@ const LOCK_MESSAGES = {
   expired: "Server session expired.",
 };
 
+const SORT_ORDER_STEP = 100;
+
 type EntryFormData = { label: string; files: File[] };
 
 const EMPTY_FORM: EntryFormData = { label: "", files: [] };
@@ -76,11 +97,49 @@ export function VaultPage() {
   const [lockMessage] = useState<string>(
     () => consumeLockReason(LOCK_MESSAGES) ?? "Locked after page refresh.",
   );
+  const reorderMut = useReorderEntries();
 
   const keys = useMemo<Keys | null>(() => {
     if (!session.ageIdentity) return null;
     return deriveAgeKeypair(session.ageIdentity);
   }, [session.ageIdentity]);
+
+  const activeEntries = useMemo(
+    () => data?.entries.filter((e) => !e.deletedAt) ?? [],
+    [data],
+  );
+  const deletedEntries = useMemo(
+    () => data?.entries.filter((e) => e.deletedAt) ?? [],
+    [data],
+  );
+  const nextSortOrder = useMemo(() => {
+    if (activeEntries.length === 0) return SORT_ORDER_STEP;
+    const max = Math.max(...activeEntries.map((e) => e.sortOrder));
+    return max + SORT_ORDER_STEP;
+  }, [activeEntries]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = activeEntries.findIndex((e) => e.id === active.id);
+    const newIndex = activeEntries.findIndex((e) => e.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reordered = arrayMove(activeEntries, oldIndex, newIndex);
+    const orders = reordered.map((e, i) => ({
+      id: e.id,
+      sortOrder: (i + 1) * SORT_ORDER_STEP,
+    }));
+    reorderMut.mutate(orders);
+  }
 
   async function onLogout() {
     setLogoutError(null);
@@ -106,9 +165,7 @@ export function VaultPage() {
             <Button size="sm" disabled={unlockBusy} onClick={unlock}>
               {unlockBusy ? "Unlocking..." : "Unlock vault"}
             </Button>
-            {unlockError && (
-              <span className="text-xs">{unlockError}</span>
-            )}
+            {unlockError && <span className="text-xs">{unlockError}</span>}
           </AlertDescription>
         </Alert>
       </main>
@@ -128,7 +185,7 @@ export function VaultPage() {
             >
               {showDeleted ? "Hide deleted" : "Show deleted"}
             </Button>
-            <CreateEntryButton keys={keys} />
+            <CreateEntryButton keys={keys} nextSortOrder={nextSortOrder} />
             <Button
               size="sm"
               variant="outline"
@@ -153,11 +210,30 @@ export function VaultPage() {
               <AlertDescription>{error.message}</AlertDescription>
             </Alert>
           )}
-          {data && data.entries.length === 0 && (
+          {data && activeEntries.length === 0 && deletedEntries.length === 0 && (
             <p className="text-sm text-muted-foreground">No entries yet.</p>
           )}
-          {data &&
-            data.entries.map((entry) => (
+          {reorderMut.error && (
+            <Alert variant="destructive">
+              <AlertDescription>{reorderMut.error.message}</AlertDescription>
+            </Alert>
+          )}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={activeEntries.map((e) => e.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {activeEntries.map((entry) => (
+                <SortableVaultRow key={entry.id} entry={entry} keys={keys} />
+              ))}
+            </SortableContext>
+          </DndContext>
+          {showDeleted &&
+            deletedEntries.map((entry) => (
               <VaultRow key={entry.id} entry={entry} keys={keys} />
             ))}
         </CardContent>
@@ -166,7 +242,50 @@ export function VaultPage() {
   );
 }
 
-function VaultRow({ entry, keys }: { entry: VaultEntrySummary; keys: Keys }) {
+function SortableVaultRow({
+  entry,
+  keys,
+}: {
+  entry: VaultEntrySummary;
+  keys: Keys;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: entry.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <VaultRow
+        entry={entry}
+        keys={keys}
+        dragHandle={
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab touch-none text-muted-foreground hover:text-foreground"
+            aria-label="Drag to reorder"
+          >
+            <GripVertical size={16} />
+          </button>
+        }
+      />
+    </div>
+  );
+}
+
+function VaultRow({
+  entry,
+  keys,
+  dragHandle,
+}: {
+  entry: VaultEntrySummary;
+  keys: Keys;
+  dragHandle?: ReactNode;
+}) {
   const [editOpen, setEditOpen] = useState(false);
   const previewQuery = useQuery({
     queryKey: ["vault", "preview", entry.id, entry.updatedAt],
@@ -214,23 +333,26 @@ function VaultRow({ entry, keys }: { entry: VaultEntrySummary; keys: Keys }) {
   const actionError = deleteMut.error ?? restoreMut.error;
 
   return (
-    <div className="flex items-center justify-between border-b py-2 last:border-b-0">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">
-          {entry.createdAt}
-          {deleted && (
-            <span className="ml-2 text-destructive">
-              deleted {entry.deletedAt}
-              {!restorable && " (restore window expired)"}
-            </span>
-          )}
-        </p>
-        {actionError && (
-          <p className="mt-1 text-xs text-destructive">
-            {actionError.message}
+    <div className="flex items-center justify-between gap-2 border-b py-2 last:border-b-0">
+      <div className="flex min-w-0 items-center gap-2">
+        {dragHandle}
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{label}</p>
+          <p className="text-xs text-muted-foreground">
+            {entry.createdAt}
+            {deleted && (
+              <span className="ml-2 text-destructive">
+                deleted {entry.deletedAt}
+                {!restorable && " (restore window expired)"}
+              </span>
+            )}
           </p>
-        )}
+          {actionError && (
+            <p className="mt-1 text-xs text-destructive">
+              {actionError.message}
+            </p>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-2">
         {deleted ? (
@@ -275,7 +397,13 @@ function VaultRow({ entry, keys }: { entry: VaultEntrySummary; keys: Keys }) {
   );
 }
 
-function CreateEntryButton({ keys }: { keys: Keys }) {
+function CreateEntryButton({
+  keys,
+  nextSortOrder,
+}: {
+  keys: Keys;
+  nextSortOrder: number;
+}) {
   const [open, setOpen] = useState(false);
   const createMut = useCreateEntry();
 
@@ -284,7 +412,7 @@ function CreateEntryButton({ keys }: { keys: Keys }) {
       { label: data.label, files: data.files },
       [keys.recipient],
     );
-    await createMut.mutateAsync({ preview, bundle, sortOrder: 0 });
+    await createMut.mutateAsync({ preview, bundle, sortOrder: nextSortOrder });
   }
 
   return (

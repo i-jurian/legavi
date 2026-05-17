@@ -209,6 +209,46 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) *respond.Error
 	return nil
 }
 
+type reorderItem struct {
+	ID        string `json:"id"`
+	SortOrder int32  `json:"sortOrder"`
+}
+
+type reorderRequest struct {
+	Orders []reorderItem `json:"orders"`
+}
+
+func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) *respond.Error {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		return respond.Unauthorized("unauthorized")
+	}
+
+	var req reorderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return respond.BadRequest("invalid json", err)
+	}
+	if len(req.Orders) == 0 {
+		return respond.BadRequest("orders required")
+	}
+
+	orders := make([]store.EntryOrder, len(req.Orders))
+	for i, o := range req.Orders {
+		id, err := uuid.Parse(o.ID)
+		if err != nil {
+			return respond.BadRequest("invalid id in orders")
+		}
+		orders[i] = store.EntryOrder{ID: id, SortOrder: o.SortOrder}
+	}
+
+	if err := h.store.ReorderVaultEntries(r.Context(), userID, orders); err != nil {
+		return respond.Internal(fmt.Errorf("reorder entries: %w", err))
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func decodeEntryRequest(r *http.Request) (entryRequest, *respond.Error) {
 	var req entryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -239,3 +239,20 @@ func (q *Queries) UpdateVaultEntry(ctx context.Context, arg UpdateVaultEntryPara
 	)
 	return i, err
 }
+
+const updateVaultEntrySortOrder = `-- name: UpdateVaultEntrySortOrder :exec
+UPDATE vault_entries
+SET sort_order = $3
+WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+`
+
+type UpdateVaultEntrySortOrderParams struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	SortOrder int32
+}
+
+func (q *Queries) UpdateVaultEntrySortOrder(ctx context.Context, arg UpdateVaultEntrySortOrderParams) error {
+	_, err := q.db.Exec(ctx, updateVaultEntrySortOrder, arg.ID, arg.UserID, arg.SortOrder)
+	return err
+}

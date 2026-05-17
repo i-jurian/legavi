@@ -3,8 +3,10 @@ import {
   createEntry,
   deleteEntry,
   listEntries,
+  reorderEntries,
   restoreEntry,
   updateEntry,
+  type EntryOrder,
   type EntryWrite,
   type ListEntriesOptions,
 } from "@/api/vault";
@@ -53,6 +55,16 @@ export function useRestoreEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => restoreEntry(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: entriesKey });
+    },
+  });
+}
+
+export function useReorderEntries() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (orders: EntryOrder[]) => reorderEntries(orders),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: entriesKey });
     },

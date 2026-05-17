@@ -160,3 +160,16 @@ export async function restoreEntry(id: string): Promise<VaultEntry> {
   }
   return fromWireEntry(await res.json());
 }
+
+export type EntryOrder = { id: string; sortOrder: number };
+
+export async function reorderEntries(orders: EntryOrder[]): Promise<void> {
+  const res = await sessionFetch(`${BASE}/entries/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orders }),
+  });
+  if (!res.ok) {
+    throw new Error(`reorderEntries failed: ${res.status} ${await res.text()}`);
+  }
+}
